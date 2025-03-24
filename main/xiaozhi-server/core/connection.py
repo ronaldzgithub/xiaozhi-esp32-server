@@ -712,7 +712,7 @@ class ConnectionHandler:
                             await self.send_text_response(response)
                             return
                     else:
-                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说"好的"来确认。"
+                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说‘好的’来确认。"
                         await self.send_text_response(response)
                         return
                 else:

@@ -1,6 +1,7 @@
 import os
 import yaml
 import numpy as np
+from core.utils.util import get_project_dir
 
 class PrivateConfig:
     def __init__(self, device_id, config, auth_code_gen):
