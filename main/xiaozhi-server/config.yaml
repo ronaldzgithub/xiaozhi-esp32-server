@@ -590,3 +590,12 @@ Proactive:
         - "生活"
         - "日常"
         - "习惯"
+
+# 声纹识别配置
+Voiceprint:
+  lightweight:
+    enabled: true
+    cache_duration: 3600  # 声纹特征缓存时间(秒)
+    min_audio_length: 2  # 最小音频长度(秒)
+    feature_threshold: 0.8  # 特征匹配阈值
+    feature_dim: 128  # 声纹特征维度

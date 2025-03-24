@@ -62,6 +62,18 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"主动对话模块初始化失败: {e}")
             self.proactive = None
 
+        # 添加声纹识别模块
+        voiceprint_cls_name = self.config["selected_module"].get("Voiceprint", "lightweight")
+        has_voiceprint_cfg = self.config.get("Voiceprint") and voiceprint_cls_name in self.config["Voiceprint"]
+        voiceprint_cfg = self.config["Voiceprint"][voiceprint_cls_name] if has_voiceprint_cfg else {}
+        
+        try:
+            from core.providers.voiceprint.lightweight import VoiceprintProvider
+            self.voiceprint = VoiceprintProvider(voiceprint_cfg)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"声纹识别模块初始化失败: {e}")
+            self.voiceprint = None
+
         self.websocket = None
         self.headers = None
         self.client_ip = None
@@ -662,6 +674,14 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).info(f"识别文本: {text}")
                 text_len, _ = remove_punctuation_and_length(text)
                 if text_len > 0:
+                    # 添加声纹识别
+                    if self.voiceprint:
+                        speaker_id = await self.voiceprint.identify_speaker(b''.join(self.asr_audio))
+                        if speaker_id:
+                            self.logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
+                            # 将说话人信息添加到对话历史
+                            self.dialogue.put(Message(role="system", content=f"当前说话人ID: {speaker_id}"))
+                    
                     # 添加情感识别
                     if self.emotion:
                         emotion = await self.emotion.detect_emotion(b''.join(self.asr_audio), text)
