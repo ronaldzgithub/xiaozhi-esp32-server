@@ -83,10 +83,9 @@ selected_module:
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
   Memory: nomem
   # 意图识别模块，默认使用function_call。开启后，可以播放音乐、控制音量、识别退出指令
-  # 意图识别使用intent_llm，优点：通用性强，缺点：增加串行前置意图识别模块，会增加处理时间
-  # 意图识别使用function_call，缺点：需要所选择的LLM支持function_call，优点：按需调用工具、速度快
-  # 默认免费的ChatGLMLLM就已经支持function_call，但是如果像追求稳定建议把LLM设置成：DoubaoLLM，使用的具体model_name是：doubao-pro-32k-functioncall-241028
   Intent: function_call
+  # 情感识别模块，默认使用轻量级实现
+  Emotion: lightweight
 
 # 意图识别，是用于理解用户意图的模块，例如：播放音乐
 Intent:
@@ -101,7 +100,7 @@ Intent:
     # 不需要动type
     type: nointent
     # plugins_func/functions下的模块，可以通过配置，选择加载哪个模块，加载后对话支持相应的function调用
-    # 系统默认已经记载“handle_exit_intent(退出识别)”、“play_music(音乐播放)”插件，请勿重复加载
+    # 系统默认已经记载"handle_exit_intent(退出识别)"、"play_music(音乐播放)"插件，请勿重复加载
     # 下面是加载查天气、角色切换、加载查新闻的插件示例
     functions:
       - change_role
@@ -553,3 +552,41 @@ wakeup_words:
   - "喵喵同学"
   - "小滨小滨"
   - "小冰小冰"
+
+# 情感识别配置
+Emotion:
+  lightweight:
+    enabled: true
+    cache_duration: 2  # 缓存时间（秒）
+    feature_threshold: 0.8  # 特征变化阈值
+    async_analysis: true  # 是否使用异步分析
+
+# 主动对话配置
+Proactive:
+  lightweight:
+    enabled: true
+    silence_threshold: 300  # 沉默阈值(秒)
+    min_interaction_count: 3  # 最少交互次数
+    proactive_cooldown: 600  # 主动对话冷却时间(秒)
+    interest_keywords:
+      music:
+        - "音乐"
+        - "歌曲"
+        - "播放"
+        - "歌"
+      news:
+        - "新闻"
+        - "时事"
+        - "热点"
+      weather:
+        - "天气"
+        - "温度"
+        - "下雨"
+      technology:
+        - "科技"
+        - "技术"
+        - "创新"
+      life:
+        - "生活"
+        - "日常"
+        - "习惯"

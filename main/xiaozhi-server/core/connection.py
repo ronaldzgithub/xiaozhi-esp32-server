@@ -38,6 +38,30 @@ class ConnectionHandler:
         self.logger = setup_logging()
         self.auth = AuthMiddleware(config)
 
+        # 添加情感识别模块
+        emotion_cls_name = self.config["selected_module"].get("Emotion", "lightweight")
+        has_emotion_cfg = self.config.get("Emotion") and emotion_cls_name in self.config["Emotion"]
+        emotion_cfg = self.config["Emotion"][emotion_cls_name] if has_emotion_cfg else {}
+        
+        try:
+            from core.providers.emotion.lightweight import EmotionProvider
+            self.emotion = EmotionProvider(emotion_cfg)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"情感识别模块初始化失败: {e}")
+            self.emotion = None
+
+        # 添加主动对话模块
+        proactive_cls_name = self.config["selected_module"].get("Proactive", "lightweight")
+        has_proactive_cfg = self.config.get("Proactive") and proactive_cls_name in self.config["Proactive"]
+        proactive_cfg = self.config["Proactive"][proactive_cls_name] if has_proactive_cfg else {}
+        
+        try:
+            from core.providers.proactive.lightweight import ProactiveDialogueManager
+            self.proactive = ProactiveDialogueManager(proactive_cfg)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"主动对话模块初始化失败: {e}")
+            self.proactive = None
+
         self.websocket = None
         self.headers = None
         self.client_ip = None
@@ -181,7 +205,7 @@ class ConnectionHandler:
         if isinstance(message, str):
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
-            await handleAudioMessage(self, message)
+            await self.handleAudioMessage(message)
 
     def _initialize_components(self):
         """加载插件"""
@@ -606,3 +630,72 @@ class ConnectionHandler:
             self.close_after_chat = True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Chat and close error: {str(e)}")
+
+    async def handleAudioMessage(self, audio):
+        if not self.asr_server_receive:
+            self.logger.bind(tag=TAG).debug(f"前期数据处理中，暂停接收")
+            return
+        if self.client_listen_mode == "auto":
+            have_voice = self.vad.is_vad(self, audio)
+        else:
+            have_voice = self.client_have_voice
+
+        # 如果本次没有声音，本段也没声音，就把声音丢弃了
+        if have_voice == False and self.client_have_voice == False:
+            await self.no_voice_close_connect()
+            self.asr_audio.append(audio)
+            self.asr_audio = self.asr_audio[-5:]  # 保留最新的5帧音频内容，解决ASR句首丢字问题
+            return
+
+        self.client_no_voice_last_time = 0.0
+        self.asr_audio.append(audio)
+
+        # 如果本段有声音，且已经停止了
+        if self.client_voice_stop:
+            self.client_abort = False
+            self.asr_server_receive = False
+            # 音频太短了，无法识别
+            if len(self.asr_audio) < 10:
+                self.asr_server_receive = True
+            else:
+                text, file_path = await self.asr.speech_to_text(self.asr_audio, self.session_id)
+                self.logger.bind(tag=TAG).info(f"识别文本: {text}")
+                text_len, _ = remove_punctuation_and_length(text)
+                if text_len > 0:
+                    # 添加情感识别
+                    if self.emotion:
+                        emotion = await self.emotion.detect_emotion(b''.join(self.asr_audio), text)
+                        self.logger.bind(tag=TAG).info(f"检测到情感: {emotion}")
+                        # 将情感信息添加到对话历史
+                        self.dialogue.put(Message(role="system", content=f"用户当前情感状态: {emotion}"))
+                    
+                    # 更新主动对话状态
+                    if self.proactive:
+                        self.proactive.update_last_interaction(time.time())
+                        await self.proactive.update_user_interests(self.dialogue.dialogue)
+                    
+                    await self.startToChat(text)
+                else:
+                    self.asr_server_receive = True
+            self.asr_audio.clear()
+            self.reset_vad_states()
+
+    async def check_proactive_dialogue(self):
+        """检查是否需要发起主动对话"""
+        if not self.proactive:
+            return
+            
+        current_time = time.time()
+        if await self.proactive.should_initiate_dialogue(current_time):
+            # 生成主动对话内容
+            content = await self.proactive.generate_proactive_content(
+                self.dialogue.dialogue,
+                self.proactive.user_interests
+            )
+            
+            # 添加到对话历史并开始对话
+            self.dialogue.put(Message(role="assistant", content=content))
+            await self.startToChat(content)
+            
+            # 更新最后主动对话时间
+            self.proactive.last_proactive_time = current_time
