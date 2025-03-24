@@ -16,6 +16,9 @@ async def handle_user_intent(conn, text):
     # 检查是否是唤醒词
     if await checkWakeupWords(conn, text):
         return True
+    # 检查是否是角色切换意图
+    if await handle_role_switch(conn, text):
+        return True
 
     if conn.use_function_call_mode:
         # 使用支持function calling的聊天方法,不再进行意图分析
@@ -39,6 +42,52 @@ async def check_direct_exit(conn, text):
             return True
     return False
 
+
+async def handle_role_switch(conn, text):
+    """处理角色切换意图"""
+    # 检查是否是角色切换相关的文本
+    role_switch_keywords = ["换个角色", "切换角色", "换角色", "换个身份", "切换身份", "换身份"]
+    if not any(keyword in text for keyword in role_switch_keywords):
+        return False
+        
+    # 获取所有可用角色
+    roles = conn.config.get("roles", [])
+    if not roles:
+        logger.bind(tag=TAG).error("未找到角色配置")
+        return False
+        
+    # 如果用户直接指定了角色名称
+    for role in roles:
+        if role["name"] in text:
+            # 切换角色
+            await switch_role(conn, role)
+            return True
+            
+    # 如果没有直接指定角色，列出所有可用角色
+    role_list = "\n".join([f"{i+1}. {role['name']} - {role['description']}" for i, role in enumerate(roles)])
+    response = f"好的，我们有以下角色可供选择：\n{role_list}\n请告诉我你想切换到哪个角色？"
+    await send_stt_message(conn, response)
+    return True
+
+
+async def switch_role(conn, role):
+    """切换到指定角色"""
+    try:
+        # 更新系统提示词
+        conn.change_system_prompt(role["prompt"])
+        
+        # 保存当前角色到私有配置
+        if conn.private_config:
+            conn.private_config.private_config["current_role"] = role["name"]
+            await conn.private_config.save()
+            
+        # 发送角色切换成功的消息
+        response = f"好的，我已经切换为{role['name']}。{role['description']}"
+        await send_stt_message(conn, response)
+        return True
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"切换角色失败: {e}")
+        return False
 
 
 async def analyze_intent_with_llm(conn, text):

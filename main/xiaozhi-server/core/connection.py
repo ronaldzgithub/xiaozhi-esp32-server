@@ -190,7 +190,16 @@ class ConnectionHandler:
         """加载提示词"""
         self.prompt = self.config["prompt"]
         if self.private_config:
-            self.prompt = self.private_config.private_config.get("prompt", self.prompt)
+            # 检查是否有保存的角色设置
+            current_role = self.private_config.private_config.get("current_role")
+            if current_role:
+                roles = self.config.get("roles", [])
+                for role in roles:
+                    if role["name"] == current_role:
+                        self.prompt = role["prompt"]
+                        break
+            else:
+                self.prompt = self.private_config.private_config.get("prompt", self.prompt)
         self.dialogue.put(Message(role="system", content=self.prompt))
 
         """加载记忆"""

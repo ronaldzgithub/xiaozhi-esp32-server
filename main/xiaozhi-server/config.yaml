@@ -77,7 +77,7 @@ selected_module:
   # 语音识别模块，默认使用FunASR本地模型
   ASR: FunASR
   # 将根据配置名称对应的type调用实际的LLM适配器
-  LLM: ChatGLMLLM
+  LLM: DoubaoLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
   TTS: EdgeTTS
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
@@ -214,7 +214,7 @@ LLM:
     # 开通后，进入这里获取密钥：https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D
     base_url: https://ark.cn-beijing.volces.com/api/v3
     model_name: doubao-pro-32k-functioncall-241028
-    api_key: 你的doubao web key
+    api_key: 613a65c6-03a2-40b1-8709-5452782af6e4
   DeepSeekLLM:
     # 定义LLM API类型
     type: openai
@@ -294,11 +294,11 @@ TTS:
     # 普通音色在这里开通：https://console.volcengine.com/speech/service/8
     # 湾湾小何音色在这里开通：https://console.volcengine.com/speech/service/10007，开通后将下面的voice设置成zh_female_wanwanxiaohe_moon_bigtts
     api_url: https://openspeech.bytedance.com/api/v1/tts
-    voice: BV001_streaming
+    voice: zh_female_wanwanxiaohe_moon_bigtts
     output_dir: tmp/
     authorization: "Bearer;"
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
+    appid: "7864085684"
+    access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
     cluster: volcano_tts
   CosyVoiceSiliconflow:
     type: siliconflow
@@ -470,7 +470,7 @@ TTS:
     # 湾湾小何音色
     voice: "zh_female_wanwanxiaohe_moon_bigtts"
     output_dir: tmp/
-    access_token: "你的机智云API key"
+    access_token: "sk-4sBgFBYHLAfFmOSV597a629f51Ad4056B218177d89Ec48Fd"
   ACGNTTS:
     #在线网址：https://acgn.ttson.cn/
     #token购买：www.ttson.cn
@@ -522,6 +522,24 @@ module_test:
     - "你好，请介绍一下你自己"
     - "What's the weather like today?"
     - "请用100字概括量子计算的基本原理和应用前景"
+
+# 角色配置
+roles:
+  - name: "默认角色"
+    description: "一个友善的AI助手"
+    prompt: "你是一个友善的AI助手，用简单易懂的语言回答问题。"
+  - name: "英语老师"
+    description: "专业的英语教师，可以帮助学习英语"
+    prompt: "你是一个专业的英语教师，擅长英语教学。在回答问题时，你会用英语回答，并适当解释重要的单词和语法。"
+  - name: "数学老师"
+    description: "专业的数学教师，可以帮助解决数学问题"
+    prompt: "你是一个专业的数学教师，擅长数学教学。在回答问题时，你会详细解释解题思路和步骤。"
+  - name: "历史老师"
+    description: "专业的历史教师，可以讲解历史知识"
+    prompt: "你是一个专业的历史教师，擅长历史教学。在回答问题时，你会用生动的语言讲述历史故事和事件。"
+  - name: "科学老师"
+    description: "专业的科学教师，可以讲解科学知识"
+    prompt: "你是一个专业的科学教师，擅长科学教学。在回答问题时，你会用通俗易懂的语言解释科学原理。" 
 
 # 唤醒词，用于识别唤醒词还是讲话内容
 wakeup_words:
