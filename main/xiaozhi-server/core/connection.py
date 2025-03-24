@@ -669,11 +669,35 @@ class ConnectionHandler:
                 emotion = await self.emotion.detect_emotion(audio_data)
                 self.logger.bind(tag=TAG).info(f"识别到情感: {emotion}")
 
+            # 处理管理员声纹设置和验证
+            if self.private_config:
+                if not self.private_config.is_admin_voiceprint_set():
+                    # 如果是第一次连接，请求设置管理员声纹
+                    if text.lower() in ["好的", "可以", "确认"]:
+                        # 提取声纹特征
+                        voiceprint = await self.voiceprint.extract_voiceprint(audio_data)
+                        if voiceprint is not None:
+                            self.private_config.set_admin_voiceprint(voiceprint)
+                            response = "管理员声纹已设置完成。从现在开始，只有您的声音才能进行管理员操作。"
+                            await self.send_text_response(response)
+                            return
+                    else:
+                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说"好的"来确认。"
+                        await self.send_text_response(response)
+                        return
+                else:
+                    # 验证是否为管理员声纹
+                    voiceprint = await self.voiceprint.extract_voiceprint(audio_data)
+                    if voiceprint is not None and self.private_config.verify_admin_voiceprint(voiceprint):
+                        self.private_config.enter_admin_mode()
+                        self.logger.bind(tag=TAG).info("进入管理员模式")
+
             # 更新对话历史
             self.dialogue.put(Message(role="user", content=text, metadata={
                 "speaker_id": speaker_id,
                 "emotion": emotion,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
             }))
 
             # 记忆系统处理
@@ -702,7 +726,8 @@ class ConnectionHandler:
             # 更新对话历史
             self.dialogue.put(Message(role="assistant", content=response, metadata={
                 "speaker_id": speaker_id,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
             }))
 
             # 语音合成
@@ -715,6 +740,19 @@ class ConnectionHandler:
 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
+
+    async def send_text_response(self, text):
+        """发送文本响应"""
+        try:
+            # 语音合成
+            tts_file, text, text_index = await self.speak_and_play(text)
+            if not tts_file:
+                return
+
+            # 发送音频响应
+            await self.send_audio_response(tts_file)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
 
     async def check_proactive_dialogue(self):
         """检查是否需要发起主动对话"""
