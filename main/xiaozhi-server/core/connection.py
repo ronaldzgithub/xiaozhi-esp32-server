@@ -643,62 +643,78 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Chat and close error: {str(e)}")
 
-    async def handleAudioMessage(self, audio):
-        if not self.asr_server_receive:
-            self.logger.bind(tag=TAG).debug(f"前期数据处理中，暂停接收")
-            return
-        if self.client_listen_mode == "auto":
-            have_voice = self.vad.is_vad(self, audio)
-        else:
-            have_voice = self.client_have_voice
+    async def handleAudioMessage(self, audio_data):
+        """处理音频消息"""
+        try:
+            # 检测语音活动
+            if self.vad:
+                is_speech = await self.vad.is_vad(self, audio_data)
+                if not is_speech:
+                    return
 
-        # 如果本次没有声音，本段也没声音，就把声音丢弃了
-        if have_voice == False and self.client_have_voice == False:
-            await self.no_voice_close_connect()
-            self.asr_audio.append(audio)
-            self.asr_audio = self.asr_audio[-5:]  # 保留最新的5帧音频内容，解决ASR句首丢字问题
-            return
+            # 识别说话人
+            speaker_id = None
+            if self.voiceprint:
+                speaker_id = await self.voiceprint.identify_speaker(audio_data)
+                self.logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
 
-        self.client_no_voice_last_time = 0.0
-        self.asr_audio.append(audio)
+            # 语音识别
+            text = await self.asr.speech_to_text(audio_data, self.session_id)
+            if not text:
+                return
 
-        # 如果本段有声音，且已经停止了
-        if self.client_voice_stop:
-            self.client_abort = False
-            self.asr_server_receive = False
-            # 音频太短了，无法识别
-            if len(self.asr_audio) < 10:
-                self.asr_server_receive = True
-            else:
-                text, file_path = await self.asr.speech_to_text(self.asr_audio, self.session_id)
-                self.logger.bind(tag=TAG).info(f"识别文本: {text}")
-                text_len, _ = remove_punctuation_and_length(text)
-                if text_len > 0:
-                    # 添加声纹识别
-                    if self.voiceprint:
-                        speaker_id = await self.voiceprint.identify_speaker(b''.join(self.asr_audio))
-                        if speaker_id:
-                            self.logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
-                            # 将说话人信息添加到对话历史
-                            self.dialogue.put(Message(role="system", content=f"当前说话人ID: {speaker_id}"))
-                    
-                    # 添加情感识别
-                    if self.emotion:
-                        emotion = await self.emotion.detect_emotion(b''.join(self.asr_audio), text)
-                        self.logger.bind(tag=TAG).info(f"检测到情感: {emotion}")
-                        # 将情感信息添加到对话历史
-                        self.dialogue.put(Message(role="system", content=f"用户当前情感状态: {emotion}"))
-                    
-                    # 更新主动对话状态
-                    if self.proactive:
-                        self.proactive.update_last_interaction(time.time())
-                        await self.proactive.update_user_interests(self.dialogue.dialogue)
-                    
-                    await self.startToChat(text)
-                else:
-                    self.asr_server_receive = True
-            self.asr_audio.clear()
-            self.reset_vad_states()
+            # 情感识别
+            emotion = None
+            if self.emotion:
+                emotion = await self.emotion.detect_emotion(audio_data)
+                self.logger.bind(tag=TAG).info(f"识别到情感: {emotion}")
+
+            # 更新对话历史
+            self.dialogue.put(Message(role="user", content=text, metadata={
+                "speaker_id": speaker_id,
+                "emotion": emotion,
+                "timestamp": time.time()
+            }))
+
+            # 记忆系统处理
+            if self.memory:
+                # 添加当前对话到记忆，包含说话人信息
+                self.memory.add_memory(
+                    self.dialogue.get_messages(),
+                    self.dialogue.get_metadata(),
+                    speaker_id
+                )
+
+            # 获取历史记忆
+            memory = []
+            if self.memory:
+                # 获取当前说话人的记忆
+                speaker_memory = self.memory.get_memory(speaker_id)
+                # 获取全局记忆
+                global_memory = self.memory.get_memory()
+                memory = speaker_memory + global_memory
+
+            # 生成回复
+            response = await self.chat(text)
+            if not response:
+                return
+
+            # 更新对话历史
+            self.dialogue.put(Message(role="assistant", content=response, metadata={
+                "speaker_id": speaker_id,
+                "timestamp": time.time()
+            }))
+
+            # 语音合成
+            tts_file, text, text_index = await self.speak_and_play(response)
+            if not tts_file:
+                return
+
+            # 发送音频响应
+            await self.send_audio_response(tts_file)
+
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
 
     async def check_proactive_dialogue(self):
         """检查是否需要发起主动对话"""

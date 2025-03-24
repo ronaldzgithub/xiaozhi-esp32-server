@@ -9,6 +9,7 @@ class MemoryProviderBase(ABC):
         self.config = config
         self.role_id = None
         self.llm = None
+        self.speaker_memories = {}  # 存储每个说话人的记忆
 
     @abstractmethod
     async def save_memory(self, msgs):
@@ -23,3 +24,35 @@ class MemoryProviderBase(ABC):
     def init_memory(self, role_id, llm):
         self.role_id = role_id    
         self.llm = llm
+
+    @abstractmethod
+    def add_memory(self, messages, metadata, speaker_id=None):
+        """添加记忆"""
+        pass
+
+    @abstractmethod
+    def get_memory(self, speaker_id=None):
+        """获取记忆"""
+        pass
+
+    @abstractmethod
+    def clear_memory(self, speaker_id=None):
+        """清除记忆"""
+        pass
+
+    def get_speaker_memory(self, speaker_id):
+        """获取特定说话人的记忆"""
+        if speaker_id not in self.speaker_memories:
+            self.speaker_memories[speaker_id] = []
+        return self.speaker_memories[speaker_id]
+
+    def add_speaker_memory(self, speaker_id, memory):
+        """添加特定说话人的记忆"""
+        if speaker_id not in self.speaker_memories:
+            self.speaker_memories[speaker_id] = []
+        self.speaker_memories[speaker_id].append(memory)
+
+    def clear_speaker_memory(self, speaker_id):
+        """清除特定说话人的记忆"""
+        if speaker_id in self.speaker_memories:
+            del self.speaker_memories[speaker_id]

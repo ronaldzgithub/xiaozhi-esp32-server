@@ -4,6 +4,7 @@ import json
 import os
 import yaml
 from core.utils.util import get_project_dir
+from config.logger import setup_logging
 
 short_term_memory_prompt = """
 # 时空记忆编织者
@@ -87,25 +88,123 @@ def extract_json_data(json_code):
     return jsonData
 
 TAG = __name__
+logger = setup_logging()
 
 class MemoryProvider(MemoryProviderBase):
     def __init__(self, config):
         super().__init__(config)
-        self.short_momery = ""
-        self.memory_path = get_project_dir() + 'data/.memory.yaml'
-        self.load_memory()
+        self.memory_dir = config.get("memory_dir", "data/memory")
+        self.ensure_memory_dir()
+        self.memory_file = os.path.join(self.memory_dir, "memory.json")
+        self.memory = self.load_memory()
+
+    def ensure_memory_dir(self):
+        """确保记忆目录存在"""
+        if not os.path.exists(self.memory_dir):
+            os.makedirs(self.memory_dir)
+
+    def load_memory(self):
+        """加载记忆"""
+        if os.path.exists(self.memory_file):
+            try:
+                with open(self.memory_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"加载记忆失败: {e}")
+                return {}
+        return {}
+
+    def save_memory(self):
+        """保存记忆"""
+        try:
+            with open(self.memory_file, 'w', encoding='utf-8') as f:
+                json.dump(self.memory, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
+
+    def add_memory(self, messages, metadata, speaker_id=None):
+        """添加记忆"""
+        try:
+            # 获取当前时间戳
+            timestamp = time.time()
+            
+            # 准备记忆数据
+            memory_data = {
+                "timestamp": timestamp,
+                "messages": messages,
+                "metadata": metadata
+            }
+            
+            if speaker_id:
+                # 如果是特定说话人，添加到说话人记忆
+                self.add_speaker_memory(speaker_id, memory_data)
+                
+                # 更新说话人统计信息
+                if speaker_id not in self.memory:
+                    self.memory[speaker_id] = {
+                        "created_at": timestamp,
+                        "last_seen": timestamp,
+                        "interaction_count": 0,
+                        "total_duration": 0
+                    }
+                else:
+                    self.memory[speaker_id]["last_seen"] = timestamp
+                    self.memory[speaker_id]["interaction_count"] += 1
+            else:
+                # 如果没有说话人ID，添加到全局记忆
+                if "global" not in self.memory:
+                    self.memory["global"] = []
+                self.memory["global"].append(memory_data)
+            
+            self.save_memory()
+            return True
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"添加记忆失败: {e}")
+            return False
+
+    def get_memory(self, speaker_id=None):
+        """获取记忆"""
+        try:
+            if speaker_id:
+                # 获取特定说话人的记忆
+                return self.get_speaker_memory(speaker_id)
+            else:
+                # 获取全局记忆
+                return self.memory.get("global", [])
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"获取记忆失败: {e}")
+            return []
+
+    def clear_memory(self, speaker_id=None):
+        """清除记忆"""
+        try:
+            if speaker_id:
+                # 清除特定说话人的记忆
+                self.clear_speaker_memory(speaker_id)
+                if speaker_id in self.memory:
+                    del self.memory[speaker_id]
+            else:
+                # 清除所有记忆
+                self.memory = {}
+                self.speaker_memories = {}
+            
+            self.save_memory()
+            return True
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"清除记忆失败: {e}")
+            return False
+
+    def get_speaker_stats(self, speaker_id):
+        """获取说话人统计信息"""
+        return self.memory.get(speaker_id, {})
+
+    def get_all_speakers(self):
+        """获取所有说话人ID"""
+        return [k for k in self.memory.keys() if k != "global"]
 
     def init_memory(self, role_id, llm):
         super().init_memory(role_id, llm)
         self.load_memory()
-    
-    def load_memory(self):
-        all_memory = {}
-        if os.path.exists(self.memory_path):
-            with open(self.memory_path, 'r', encoding='utf-8') as f:
-                all_memory = yaml.safe_load(f) or {}
-        if self.role_id in all_memory:
-            self.short_momery = all_memory[self.role_id]
     
     def save_memory_to_file(self):
         all_memory = {}
