@@ -278,9 +278,12 @@ LLM:
       k: "v"
       k2: "v2"
 TTS:
-  selected_module: edge-tts
-  edge-tts:
+  # 当前支持的type为edge、doubao，可自行适配
+  EdgeTTS:
+    # 定义TTS API类型
+    type: edge
     voice: zh-CN-XiaoxiaoNeural
+      voice: zh-CN-XiaoxiaoNeural
     voice_features:
       gender: female
       age: young
@@ -303,11 +306,6 @@ TTS:
       uniqueness: medium
       reliability: high
       popularity: high
-  # 当前支持的type为edge、doubao，可自行适配
-  EdgeTTS:
-    # 定义TTS API类型
-    type: edge
-    voice: zh-CN-XiaoxiaoNeural
     output_dir: tmp/
   DoubaoTTS:
     # 定义TTS API类型
