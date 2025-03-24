@@ -137,6 +137,19 @@ class ConnectionHandler:
         if self.config["selected_module"]["Intent"] == 'function_call':
             self.use_function_call_mode = True
 
+        # 添加角色管理
+        try:
+            from core.providers.role.role_manager import RoleManager
+            from core.providers.role.role_wizard import RoleWizard
+            self.role_manager = RoleManager(config)
+            self.role_wizard = RoleWizard(self.role_manager)
+            self.is_creating_role = False
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"角色管理模块初始化失败: {e}")
+            self.role_manager = None
+            self.role_wizard = None
+            self.is_creating_role = False
+
     async def handle_connection(self, ws):
         try:
             # 获取并验证headers
@@ -668,6 +681,23 @@ class ConnectionHandler:
             if self.emotion:
                 emotion = await self.emotion.detect_emotion(audio_data)
                 self.logger.bind(tag=TAG).info(f"识别到情感: {emotion}")
+
+            # 处理角色创建流程
+            if self.is_creating_role and self.role_wizard:
+                response = self.role_wizard.process_answer(text)
+                if response:
+                    await self.send_text_response(response)
+                    if "角色创建成功" in response:
+                        self.is_creating_role = False
+                    return
+
+            # 处理管理员命令
+            if self.private_config and self.private_config.is_in_admin_mode():
+                if "增加一个角色" in text or "创建一个角色" in text:
+                    self.is_creating_role = True
+                    response = self.role_wizard.start_creation()
+                    await self.send_text_response(response)
+                    return
 
             # 处理管理员声纹设置和验证
             if self.private_config:
