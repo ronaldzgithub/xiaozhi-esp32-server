@@ -97,6 +97,7 @@ class MemoryProvider(MemoryProviderBase):
         self.ensure_memory_dir()
         self.memory_file = os.path.join(self.memory_dir, "memory.json")
         self.memory = self.load_memory()
+        self.short_memory = []
 
     def ensure_memory_dir(self):
         """确保记忆目录存在"""
@@ -211,7 +212,7 @@ class MemoryProvider(MemoryProviderBase):
         if os.path.exists(self.memory_path):
               with open(self.memory_path, 'r', encoding='utf-8') as f:
                   all_memory = yaml.safe_load(f) or {}
-        all_memory[self.role_id] = self.short_momery
+        all_memory[self.role_id] = self.short_memory
         with open(self.memory_path, 'w', encoding='utf-8') as f:
             yaml.dump(all_memory, f, allow_unicode=True)
         
@@ -229,9 +230,9 @@ class MemoryProvider(MemoryProviderBase):
                 msgStr += f"User: {msg.content}\n"
             elif msg.role== "assistant":
                 msgStr += f"Assistant: {msg.content}\n"
-        if len(self.short_momery) > 0:
+        if len(self.short_memory) > 0:
             msgStr+="历史记忆：\n"
-            msgStr+=self.short_momery
+            msgStr+=self.short_memory
         
         #当前时间
         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -242,14 +243,14 @@ class MemoryProvider(MemoryProviderBase):
         json_str = extract_json_data(result)
         try:
             json_data = json.loads(json_str) # 检查json格式是否正确
-            self.short_momery = json_str
+            self.short_memory = json_str
         except Exception as e:
             print("Error:", e)
         
         self.save_memory_to_file()
         logger.bind(tag=TAG).info(f"Save memory successful - Role: {self.role_id}")
 
-        return self.short_momery
+        return self.short_memory
     
     async def query_memory(self, query: str)-> str:
-        return self.short_momery
+        return self.short_memory

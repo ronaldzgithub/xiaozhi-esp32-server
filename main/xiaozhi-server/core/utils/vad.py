@@ -33,6 +33,8 @@ class SileroVAD(VAD):
             pcm_frame = self.decoder.decode(opus_packet, 960)
             conn.client_audio_buffer += pcm_frame  # 将新数据加入缓冲区
 
+            
+
             # 处理缓冲区中的完整帧（每次处理512采样点）
             client_have_voice = False
             while len(conn.client_audio_buffer) >= 512 * 2:
@@ -41,8 +43,11 @@ class SileroVAD(VAD):
                 conn.client_audio_buffer = conn.client_audio_buffer[512 * 2:]
 
                 # 转换为模型需要的张量格式
+                print ("******adsfadsfadsfasdf*******")
                 audio_int16 = np.frombuffer(chunk, dtype=np.int16)
+                print ("*****************************")
                 audio_float32 = audio_int16.astype(np.float32) / 32768.0
+                print ("*******444444444444444*******")
                 audio_tensor = torch.from_numpy(audio_float32)
 
                 # 检测语音活动
