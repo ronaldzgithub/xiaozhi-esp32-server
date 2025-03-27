@@ -5,11 +5,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
-            "type": "debugpy",
+            "name": "Python: 当前文件",
+            "type": "python",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python: 启动服务器",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main/xiaozhi-server/app.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/main/xiaozhi-server",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/main/xiaozhi-server"
+            }
         }
     ]
 }

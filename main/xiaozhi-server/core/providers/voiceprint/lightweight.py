@@ -36,7 +36,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
         try:
             # 检查音频数据是否为空
             if not audio_data:
-                self.logger.bind(tag=TAG).warning("音频数据为空")
+                logger.bind(tag=TAG).warning("音频数据为空")
                 return None
 
             # 尝试将音频数据转换为numpy数组
@@ -50,12 +50,12 @@ class VoiceprintProvider(VoiceprintProviderBase):
                     # 将int16转换为float32并归一化
                     audio_array = audio_array.astype(np.float32) / 32768.0
                 except ValueError as e:
-                    self.logger.bind(tag=TAG).error(f"音频数据转换错误: {e}")
+                    logger.bind(tag=TAG).error(f"音频数据转换错误: {e}")
                     return None
 
             # 检查数组长度
             if len(audio_array) == 0:
-                self.logger.bind(tag=TAG).warning("转换后的音频数组为空")
+                logger.bind(tag=TAG).warning("转换后的音频数组为空")
                 return None
 
             # 确保音频数据长度是2的幂次方
@@ -83,14 +83,18 @@ class VoiceprintProvider(VoiceprintProviderBase):
 
             # 确保特征维度一致
             if len(features) != 131:  # 128 + 3
-                self.logger.bind(tag=TAG).warning(f"特征维度不匹配: {len(features)} != 131")
+                logger.bind(tag=TAG).warning(f"特征维度不匹配: {len(features)} != 131")
                 return None
 
             return features
 
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"特征提取错误: {e}")
+            logger.bind(tag=TAG).error(f"特征提取错误: {e}")
             return None
+
+    async def extract_voiceprint(self, audio_data):
+        """提取声纹特征"""
+        return self._extract_voice_features(audio_data)
 
     async def compare_voiceprints(self, voiceprint1, voiceprint2):
         """比较两个声纹特征的相似度"""

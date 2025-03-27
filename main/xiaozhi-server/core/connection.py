@@ -288,12 +288,11 @@ class ConnectionHandler:
             return False
         return not self.is_device_verified
 
-    def chat(self, query):
+    async def chat(self, query):
         if self.isNeedAuth():
             self.llm_finish_task = True
-            future = asyncio.run_coroutine_threadsafe(self._check_and_broadcast_auth_code(), self.loop)
-            future.result()
-            return True
+            await self._check_and_broadcast_auth_code()
+            return "请先完成设备验证。"
 
         self.dialogue.put(Message(role="user", content=query))
 
@@ -302,8 +301,7 @@ class ConnectionHandler:
         try:
             start_time = time.time()
             # 使用带记忆的对话
-            future = asyncio.run_coroutine_threadsafe(self.memory.query_memory(query), self.loop)
-            memory_str = future.result()
+            memory_str = await self.memory.query_memory(query)
 
             self.logger.bind(tag=TAG).debug(f"记忆内容: {memory_str}")
             llm_responses = self.llm.response(
@@ -312,7 +310,7 @@ class ConnectionHandler:
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
-            return None
+            return "抱歉，我现在无法正常回答，请稍后再试。"
 
         self.llm_finish_task = False
         text_index = 0
@@ -341,9 +339,6 @@ class ConnectionHandler:
                 segment_text_raw = current_text[:last_punct_pos + 1]
                 segment_text = get_string_no_punctuation_or_emoji(segment_text_raw)
                 if segment_text:
-                    # 强制设置空字符，测试TTS出错返回语音的健壮性
-                    # if text_index % 2 == 0:
-                    #     segment_text = " "
                     text_index += 1
                     self.recode_first_last_text(segment_text, text_index)
                     future = self.executor.submit(self.speak_and_play, segment_text, text_index)
@@ -362,9 +357,10 @@ class ConnectionHandler:
                 self.tts_queue.put(future)
 
         self.llm_finish_task = True
-        self.dialogue.put(Message(role="assistant", content="".join(response_message)))
+        response_text = "".join(response_message)
+        self.dialogue.put(Message(role="assistant", content=response_text))
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
-        return True
+        return response_text
 
     def chat_with_function_calling(self, query, tool_call=False):
         self.logger.bind(tag=TAG).debug(f"Chat with function calling start: {query}")
@@ -680,11 +676,11 @@ class ConnectionHandler:
         self.client_voice_stop = False
         self.logger.bind(tag=TAG).debug("VAD states reset.")
 
-    def chat_and_close(self, text):
+    async def chat_and_close(self, text):
         """Chat with the user and then close the connection"""
         try:
             # Use the existing chat method
-            self.chat(text)
+            await self.chat(text)
 
             # After chat is complete, close the connection
             self.close_after_chat = True
