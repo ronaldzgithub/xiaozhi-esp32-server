@@ -216,7 +216,8 @@ class MemoryProvider(MemoryProviderBase):
         with open(self.memory_path, 'w', encoding='utf-8') as f:
             yaml.dump(all_memory, f, allow_unicode=True)
         
-    async def save_memory(self, msgs):
+    async def save_memory_async(self, msgs):
+        """异步保存记忆"""
         if self.llm is None:
             logger.bind(tag=TAG).error("LLM is not set for memory provider")
             return None

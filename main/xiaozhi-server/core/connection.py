@@ -699,22 +699,24 @@ class ConnectionHandler:
                 is_speech = await self.vad.is_vad(self, audio_data)
                 if not is_speech:
                     return
-
+            self.logger.bind(tag=TAG).info(f"检测语音活动")
             # 识别说话人
             speaker_id = None
             if self.voiceprint:
                 speaker_id = await self.voiceprint.identify_speaker(audio_data)
                 self.logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
-
+            self.logger.bind(tag=TAG).info(f"识别说话人")
             # 语音识别
-            text = await self.asr.speech_to_text(audio_data, self.session_id)
-            if not text:
+            result = await self.asr.speech_to_text(audio_data, self.session_id)
+            if not result:
                 return
+            text, audio_file = result  # 解构返回的元组
+            self.logger.bind(tag=TAG).info(f"语音识别: {text}")
 
             # 情感识别
             emotion = None
             if self.emotion:
-                emotion = await self.emotion.detect_emotion(audio_data)
+                emotion = await self.emotion.detect_emotion(audio_data, text)
                 self.logger.bind(tag=TAG).info(f"识别到情感: {emotion}")
 
             # 处理角色创建流程
@@ -725,6 +727,8 @@ class ConnectionHandler:
                     if "角色创建成功" in response:
                         self.is_creating_role = False
                     return
+            self.logger.bind(tag=TAG).info(f"角色创建流程")
+
 
             # 处理管理员命令
             if self.private_config and self.private_config.is_in_admin_mode():
@@ -733,6 +737,7 @@ class ConnectionHandler:
                     response = self.role_wizard.start_creation()
                     await self.send_text_response(response)
                     return
+            self.logger.bind(tag=TAG).info(f"管理员命令")
 
             # 处理管理员声纹设置和验证
             if self.private_config:
@@ -747,7 +752,7 @@ class ConnectionHandler:
                             await self.send_text_response(response)
                             return
                     else:
-                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说‘好的’来确认。"
+                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说'好的'来确认。"
                         await self.send_text_response(response)
                         return
                 else:
@@ -756,7 +761,7 @@ class ConnectionHandler:
                     if voiceprint is not None and self.private_config.verify_admin_voiceprint(voiceprint):
                         self.private_config.enter_admin_mode()
                         self.logger.bind(tag=TAG).info("进入管理员模式")
-
+            self.logger.bind(tag=TAG).info(f"管理员声纹设置和验证")
             # 更新对话历史
             self.dialogue.put(Message(role="user", content=text, metadata={
                 "speaker_id": speaker_id,
@@ -764,16 +769,16 @@ class ConnectionHandler:
                 "timestamp": time.time(),
                 "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
             }))
-
+            self.logger.bind(tag=TAG).info(f"更新对话历史")
             # 记忆系统处理
             if self.memory:
                 # 添加当前对话到记忆，包含说话人信息
                 self.memory.add_memory(
-                    self.dialogue.get_messages(),
+                    self.dialogue.get_llm_dialogue(),
                     self.dialogue.get_metadata(),
                     speaker_id
                 )
-
+            self.logger.bind(tag=TAG).info(f"记忆系统处理")
             # 获取历史记忆
             memory = []
             if self.memory:
@@ -782,11 +787,13 @@ class ConnectionHandler:
                 # 获取全局记忆
                 global_memory = self.memory.get_memory()
                 memory = speaker_memory + global_memory
-
+            self.logger.bind(tag=TAG).info(f"获取历史记忆{memory}")
             # 生成回复
+            self.logger.bind(tag=TAG).info(f"生成回复{text}")
             response = await self.chat(text)
             if not response:
                 return
+            self.logger.bind(tag=TAG).info(f"生成回复")
 
             # 更新对话历史
             self.dialogue.put(Message(role="assistant", content=response, metadata={
@@ -799,10 +806,10 @@ class ConnectionHandler:
             tts_file, text, text_index = await self.speak_and_play(response)
             if not tts_file:
                 return
-
+            self.logger.bind(tag=TAG).info(f"语音合成")
             # 发送音频响应
             await self.send_audio_response(tts_file)
-
+            self.logger.bind(tag=TAG).info(f"发送音频响应") 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
 

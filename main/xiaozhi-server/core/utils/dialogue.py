@@ -4,22 +4,28 @@ from datetime import datetime
 
 
 class Message:
-    def __init__(self, role: str, content: str = None, uniq_id: str = None, tool_calls = None, tool_call_id=None):
+    def __init__(self, role: str, content: str = None, uniq_id: str = None, tool_calls = None, tool_call_id=None, metadata=None):
         self.uniq_id = uniq_id if uniq_id is not None else str(uuid.uuid4())
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
+        self.metadata = metadata or {}
 
 
 class Dialogue:
     def __init__(self):
         self.dialogue: List[Message] = []
+        self.metadata = {}  # 添加元数据存储
         # 获取当前时间
         self.current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     def put(self, message: Message):
+        """添加消息到对话历史"""
         self.dialogue.append(message)
+        # 更新元数据
+        if message.metadata:
+            self.metadata.update(message.metadata)
 
     def getMessages(self, m, dialogue):
         if m.tool_calls is not None:
@@ -34,6 +40,10 @@ class Dialogue:
         for m in self.dialogue:
             self.getMessages(m, dialogue)
         return dialogue
+
+    def get_metadata(self):
+        """获取对话元数据"""
+        return self.metadata
 
     def update_system_message(self, new_content: str):
         """更新或添加系统消息"""

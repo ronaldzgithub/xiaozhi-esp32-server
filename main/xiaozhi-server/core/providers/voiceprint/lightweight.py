@@ -13,45 +13,97 @@ class VoiceprintProvider(VoiceprintProviderBase):
         self.storage = VoiceprintStorage(config.get("storage_dir", "data/voiceprints"))
         self.current_speaker_id = None
         self.current_speaker_start_time = None
+        self.feature_threshold = config.get("feature_threshold", 0.8)  # 特征匹配阈值
 
-    async def extract_voiceprint(self, audio_data):
+    def _is_valid_audio(self, audio_data):
+        """检查音频数据是否有效"""
+        if not audio_data or len(audio_data) == 0:
+            return False
+        return True
+
+    def _adjust_feature_dimension(self, features):
+        """调整特征维度到指定大小"""
+        if len(features) < self.feature_dim:
+            # 如果特征不足，用0填充
+            return np.pad(features, (0, self.feature_dim - len(features)))
+        elif len(features) > self.feature_dim:
+            # 如果特征过多，截断
+            return features[:self.feature_dim]
+        return features
+
+    def _extract_voice_features(self, audio_data):
         """提取声纹特征"""
         try:
-            if not self._is_valid_audio(audio_data):
+            # 检查音频数据是否为空
+            if not audio_data:
+                self.logger.bind(tag=TAG).warning("音频数据为空")
                 return None
 
-            # 将音频数据转换为numpy数组
-            audio_array = np.frombuffer(audio_data, dtype=np.float32)
-            
-            # 简单的特征提取：使用音频的统计特征
-            features = []
-            
-            # 1. 计算音频的统计特征
-            features.extend([
-                np.mean(audio_array),
-                np.std(audio_array),
-                np.max(audio_array),
-                np.min(audio_array)
-            ])
-            
-            # 2. 计算频谱特征
+            # 尝试将音频数据转换为numpy数组
+            try:
+                # 首先尝试转换为float32
+                audio_array = np.frombuffer(audio_data, dtype=np.float32)
+            except ValueError:
+                try:
+                    # 如果失败，尝试转换为int16
+                    audio_array = np.frombuffer(audio_data, dtype=np.int16)
+                    # 将int16转换为float32并归一化
+                    audio_array = audio_array.astype(np.float32) / 32768.0
+                except ValueError as e:
+                    self.logger.bind(tag=TAG).error(f"音频数据转换错误: {e}")
+                    return None
+
+            # 检查数组长度
+            if len(audio_array) == 0:
+                self.logger.bind(tag=TAG).warning("转换后的音频数组为空")
+                return None
+
+            # 确保音频数据长度是2的幂次方
+            target_length = 2 ** int(np.ceil(np.log2(len(audio_array))))
+            if len(audio_array) < target_length:
+                audio_array = np.pad(audio_array, (0, target_length - len(audio_array)))
+
+            # 计算FFT特征
             fft_features = np.abs(np.fft.fft(audio_array))
-            features.extend(fft_features[:self.feature_dim - 4])  # 补充到指定维度
-            
-            # 归一化特征
-            features = np.array(features)
-            features = (features - np.mean(features)) / (np.std(features) + 1e-6)
-            
+            # 只保留前128个频率分量
+            fft_features = fft_features[:128]
+            # 归一化
+            fft_features = fft_features / np.max(fft_features)
+
+            # 计算其他特征
+            pitch = self._calculate_pitch(audio_array)
+            volume = self._calculate_volume(audio_array)
+            speed = self._calculate_speed(audio_array)
+
+            # 组合所有特征
+            features = np.concatenate([
+                fft_features,
+                np.array([pitch, volume, speed])
+            ])
+
+            # 确保特征维度一致
+            if len(features) != 131:  # 128 + 3
+                self.logger.bind(tag=TAG).warning(f"特征维度不匹配: {len(features)} != 131")
+                return None
+
             return features
-            
+
         except Exception as e:
-            logger.bind(tag=TAG).error(f"声纹特征提取错误: {e}")
+            self.logger.bind(tag=TAG).error(f"特征提取错误: {e}")
             return None
 
     async def compare_voiceprints(self, voiceprint1, voiceprint2):
         """比较两个声纹特征的相似度"""
         try:
             if voiceprint1 is None or voiceprint2 is None:
+                return 0.0
+                
+            # 调整特征维度
+            voiceprint1 = self._adjust_feature_dimension(voiceprint1)
+            voiceprint2 = self._adjust_feature_dimension(voiceprint2)
+            
+            if len(voiceprint1) != len(voiceprint2):
+                logger.bind(tag=TAG).warning(f"特征维度不匹配: {len(voiceprint1)} != {len(voiceprint2)}")
                 return 0.0
                 
             # 计算余弦相似度
@@ -69,7 +121,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
         """识别说话人"""
         try:
             # 提取当前音频的声纹特征
-            current_voiceprint = await self.extract_voiceprint(audio_data)
+            current_voiceprint = await self._extract_voice_features(audio_data)
             if current_voiceprint is None:
                 return None
 
@@ -80,6 +132,8 @@ class VoiceprintProvider(VoiceprintProviderBase):
             for speaker_id in self.storage.get_all_speakers():
                 stored_voiceprint = self.storage.load_voiceprint(speaker_id)
                 if stored_voiceprint is not None:
+                    # 调整存储的特征维度
+                    stored_voiceprint = self._adjust_feature_dimension(stored_voiceprint)
                     similarity = await self.compare_voiceprints(
                         current_voiceprint,
                         stored_voiceprint

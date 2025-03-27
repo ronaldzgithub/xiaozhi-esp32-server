@@ -77,6 +77,13 @@ class ASRProvider(ASRProviderBase):
         """语音转文本主处理逻辑"""
         file_path = None
         try:
+            # 确保 opus_data 是列表类型
+            if isinstance(opus_data, bytes):
+                opus_data = [opus_data]
+            elif not isinstance(opus_data, list):
+                logger.bind(tag=TAG).error(f"不支持的音频数据类型: {type(opus_data)}")
+                return "", None
+
             # 保存音频文件
             start_time = time.time()
             file_path = self.save_audio_to_file(opus_data, session_id)
