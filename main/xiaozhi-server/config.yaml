@@ -77,9 +77,9 @@ selected_module:
   # 语音识别模块，默认使用FunASR本地模型
   ASR: FunASR
   # 将根据配置名称对应的type调用实际的LLM适配器
-  LLM: DoubaoLLM
+  LLM: ChatGLMLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
-  TTS: EdgeTTS
+  TTS: GizwitsTTS
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
   Memory: mem_local_short
   # 意图识别模块，默认使用function_call。开启后，可以播放音乐、控制音量、识别退出指令
@@ -228,7 +228,7 @@ LLM:
     # 可在这里找到你的api key https://bigmodel.cn/usercenter/proj-mgmt/apikeys
     model_name: glm-4-flash
     url: https://open.bigmodel.cn/api/paas/v4/
-    api_key: 你的chat-glm web key
+    api_key: f387fd9091d44362b5d004505a786f60.PiPipFmgJwm4zPVH
   OllamaLLM:
     # 定义LLM API类型
     type: ollama
