@@ -115,14 +115,6 @@ class MemoryProvider(MemoryProviderBase):
                 return {}
         return {}
 
-    def save_memory(self):
-        """保存记忆"""
-        try:
-            with open(self.memory_file, 'w', encoding='utf-8') as f:
-                json.dump(self.memory, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
-
     def add_memory(self, messages, metadata, speaker_id=None):
         """添加记忆"""
         try:
@@ -157,7 +149,7 @@ class MemoryProvider(MemoryProviderBase):
                     self.memory["global"] = []
                 self.memory["global"].append(memory_data)
             
-            self.save_memory()
+            self.save_memory(messages)
             return True
         except Exception as e:
             logger.bind(tag=TAG).error(f"添加记忆失败: {e}")
@@ -216,10 +208,17 @@ class MemoryProvider(MemoryProviderBase):
         with open(self.memory_path, 'w', encoding='utf-8') as f:
             yaml.dump(all_memory, f, allow_unicode=True)
         
-    async def save_memory_async(self, msgs):
+    def save_memory(self, msgs=None):
         """异步保存记忆"""
         if self.llm is None:
             logger.bind(tag=TAG).error("LLM is not set for memory provider")
+            return None
+        
+        # 如果 msgs 为 None，清除所有记忆
+        if msgs is None:
+            self.short_memory = ""
+            self.save_memory_to_file()
+            logger.bind(tag=TAG).info(f"Clear all memory - Role: {self.role_id}")
             return None
         
         if len(msgs) < 2:
