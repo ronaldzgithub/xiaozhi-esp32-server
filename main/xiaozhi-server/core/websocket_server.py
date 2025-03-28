@@ -19,6 +19,19 @@ class WebSocketServer:
         memory_cls_name = self.config["selected_module"].get("Memory", "nomem") # 默认使用nomem
         has_memory_cfg = self.config.get("Memory") and memory_cls_name in self.config["Memory"]
         memory_cfg = self.config["Memory"][memory_cls_name] if has_memory_cfg else {}
+        
+        l_llm = llm.create_instance(
+                self.config["selected_module"]["LLM"]
+                if not 'type' in self.config["LLM"][self.config["selected_module"]["LLM"]]
+                else
+                self.config["LLM"][self.config["selected_module"]["LLM"]]['type'],
+                self.config["LLM"][self.config["selected_module"]["LLM"]],
+            )
+        
+        mem = memory.create_instance(memory_cls_name, memory_cfg)
+
+        
+        mem.init_memory(None, l_llm)
 
         """创建处理模块实例"""
         return (
@@ -34,13 +47,7 @@ class WebSocketServer:
                 self.config["ASR"][self.config["selected_module"]["ASR"]],
                 self.config["delete_audio"]
             ),
-            llm.create_instance(
-                self.config["selected_module"]["LLM"]
-                if not 'type' in self.config["LLM"][self.config["selected_module"]["LLM"]]
-                else
-                self.config["LLM"][self.config["selected_module"]["LLM"]]['type'],
-                self.config["LLM"][self.config["selected_module"]["LLM"]],
-            ),
+            l_llm,
             tts.create_instance(
                 self.config["selected_module"]["TTS"]
                 if not 'type' in self.config["TTS"][self.config["selected_module"]["TTS"]]
@@ -49,7 +56,7 @@ class WebSocketServer:
                 self.config["TTS"][self.config["selected_module"]["TTS"]],
                 self.config["delete_audio"]
             ),
-            memory.create_instance(memory_cls_name, memory_cfg),
+            mem,
             intent.create_instance(
                 self.config["selected_module"]["Intent"]
                 if not 'type' in self.config["Intent"][self.config["selected_module"]["Intent"]]

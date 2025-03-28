@@ -304,7 +304,7 @@ class ConnectionHandler:
             memory_str = self.memory.query_memory(query)
             # 获取当前说话人的记忆
             speaker_memory = self.memory.get_memory(speaker_id)
-            memory_str += speaker_memory
+            memory_str+=(speaker_memory)
 
             self.logger.bind(tag=TAG).debug(f"记忆内容: {memory_str}")
             llm_responses = self.llm.response(
@@ -371,7 +371,7 @@ class ConnectionHandler:
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
         return response_text
 
-    def chat_with_function_calling(self, query, tool_call=False):
+    def chat_with_function_calling(self, query, tool_call=False, emotion=None, speaker_id=None):
         self.logger.bind(tag=TAG).debug(f"Chat with function calling start: {query}")
         """Chat with function calling for intent detection using streaming"""
         if self.isNeedAuth():
@@ -397,15 +397,19 @@ class ConnectionHandler:
             # 使用带记忆的对话
             future = asyncio.run_coroutine_threadsafe(self.memory.query_memory(query), self.loop)
             memory_str = future.result()
+            # 使用带记忆的对话
+            future = asyncio.run_coroutine_threadsafe(self.memory.get_memory(speaker_id), self.loop)
+            speaker_memory = future.result()
+        
+            memory_str+=(speaker_memory)
 
-            # self.logger.bind(tag=TAG).info(f"对话记录: {self.dialogue.get_llm_dialogue_with_memory(memory_str)}")
-
-            # 使用支持functions的streaming接口
+            
             llm_responses = self.llm.response_with_functions(
                 self.session_id,
                 self.dialogue.get_llm_dialogue_with_memory(memory_str),
                 functions=functions
             )
+
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
             return None
@@ -515,12 +519,17 @@ class ConnectionHandler:
 
         # 存储对话内容
         if len(response_message) > 0:
-            self.dialogue.put(Message(role="assistant", content="".join(response_message)))
+            self.dialogue.put(Message(role="assistant", content="".join(response_message),metadata={
+                    "speaker_id": speaker_id,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                    "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
+                }))
 
         self.llm_finish_task = True
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
 
-        return True
+        return full_text
 
     def _handle_function_result(self, result, function_call_data, text_index):
         if result.action == Action.RESPONSE:  # 直接回复前端

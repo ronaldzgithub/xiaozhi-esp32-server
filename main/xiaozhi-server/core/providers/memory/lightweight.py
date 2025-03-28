@@ -49,7 +49,7 @@ class MemoryProvider:
         except Exception as e:
             self.logger.error(f"保存记忆失败: {e}")
 
-    def add_memory(self, msgs, metadata=None, speaker_id=None):
+    async def add_memory(self, msgs, metadata=None, speaker_id=None):
         """添加记忆"""
         try:
             # 获取当前时间
@@ -58,10 +58,16 @@ class MemoryProvider:
             # 构建记忆内容
             memory_content = []
             for msg in msgs:
-                if msg.role == "user":
-                    memory_content.append(f"用户: {msg.content}")
-                elif msg.role == "assistant":
-                    memory_content.append(f"助手: {msg.content}")
+                if isinstance(msg, dict):
+                    if msg['role'] == "user":
+                        memory_content.append(f"User: {msg['content']}")
+                    elif msg['role'] == "assistant":
+                        memory_content.append(f"Assitant: {msg['content']}")
+                else:
+                    if msg.role == "user":
+                        memory_content.append(f"User: {msg.content}")
+                    elif msg.role == "assistant":
+                        memory_content.append(f"Assitant: {msg.content}")
             
             # 构建记忆元数据
             memory_metadata = {

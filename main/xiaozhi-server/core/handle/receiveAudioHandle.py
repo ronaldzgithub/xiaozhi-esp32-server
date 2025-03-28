@@ -11,12 +11,16 @@ logger = setup_logging()
 
 
 async def handleAudioMessage(conn, audio):
+    # 检查是否允许接收音频数据
     if not conn.asr_server_receive:
         logger.bind(tag=TAG).debug(f"前期数据处理中，暂停接收")
         return
+    # 根据客户端监听模式决定是否有声音
     if conn.client_listen_mode == "auto":
+        # 自动模式下，使用VAD检测是否有声音
         have_voice = conn.vad.is_vad(conn, audio)
     else:
+        # 非自动模式下，直接使用客户端报告的有无声音信息
         have_voice = conn.client_have_voice
 
     # 如果本次没有声音，本段也没声音，就把声音丢弃了
@@ -38,10 +42,8 @@ async def handleAudioMessage(conn, audio):
             try:
                 # 识别说话人
                 speaker_id = None
-                if conn.voiceprint:
-                    speaker_id = await conn.voiceprint.identify_speaker(conn.asr_audio)
-                    logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
-                logger.bind(tag=TAG).info(f"识别说话人")
+                emotion = None
+                
 
                 # 语音识别
                 text, file_path = await conn.asr.speech_to_text(conn.asr_audio, conn.session_id)
@@ -52,6 +54,11 @@ async def handleAudioMessage(conn, audio):
                     conn.asr_server_receive = True
                     raise Exception("语音识别失败")
                 
+                if conn.voiceprint:
+                    speaker_id = await conn.voiceprint.identify_speaker(conn.asr_audio)
+                    logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
+                logger.bind(tag=TAG).info(f"识别说话人")
+
                 # 情感识别
                 emotion = None
                 if conn.emotion:
@@ -105,12 +112,14 @@ async def handleAudioMessage(conn, audio):
                 # 记忆系统处理
                 if conn.memory:
                     # 添加当前对话到记忆，包含说话人信息
-                    conn.memory.add_memory(
+                    await conn.memory.add_memory(
                         conn.dialogue.get_llm_dialogue(),
                         conn.dialogue.get_metadata(),
                         speaker_id
                     )
                 logger.bind(tag=TAG).info(f"记忆系统处理")
+
+                
 
                 logger.bind(tag=TAG).info(f"生成回复{text}")
                 await startToChat(conn, text, emotion, speaker_id)
@@ -124,7 +133,7 @@ async def handleAudioMessage(conn, audio):
         conn.reset_vad_states()
 
 
-async def startToChat(conn, text, emotion, speaker_id):
+async def startToChat(conn, text, emotion=None, speaker_id=None):
     # 首先进行意图分析
     intent_handled = await handle_user_intent(conn, text)
     
@@ -137,7 +146,7 @@ async def startToChat(conn, text, emotion, speaker_id):
     await send_stt_message(conn, text)
     if conn.use_function_call_mode:
         # 使用支持function calling的聊天方法
-        conn.executor.submit(conn.chat_with_function_calling, text)
+        conn.executor.submit(conn.chat_with_function_calling, text, False,emotion, speaker_id)
     else:
         conn.executor.submit(conn.chat, text, emotion, speaker_id)
 

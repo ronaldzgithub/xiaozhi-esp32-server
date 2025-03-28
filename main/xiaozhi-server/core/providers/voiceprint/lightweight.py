@@ -40,11 +40,17 @@ class VoiceprintProvider(VoiceprintProviderBase):
                 return None
 
             # 尝试将音频数据转换为numpy数组
+            if isinstance(audio_data, list):
+                audio_data = b''.join(audio_data)
             try:
                 # 首先尝试转换为float32
                 audio_array = np.frombuffer(audio_data, dtype=np.float32)
             except ValueError:
                 try:
+                    
+                    # 确保数据长度是偶数（对于int16）
+                    if len(audio_data) % 2 != 0:
+                        audio_data = audio_data[:-1]
                     # 如果失败，尝试转换为int16
                     audio_array = np.frombuffer(audio_data, dtype=np.int16)
                     # 将int16转换为float32并归一化
@@ -96,6 +102,35 @@ class VoiceprintProvider(VoiceprintProviderBase):
         """提取声纹特征"""
         return self._extract_voice_features(audio_data)
 
+    def _calculate_pitch(self, audio_array):
+        """计算音高特征"""
+        try:
+            # 使用自相关函数估计音高
+            correlation = np.correlate(audio_array, audio_array, mode='full')
+            correlation = correlation[len(correlation)//2:]
+            r = correlation[1:]
+            peaks = np.where(r > np.max(r) * 0.9)[0]
+            if len(peaks) > 0:
+                return peaks[0]
+            return 0
+        except:
+            return 0
+
+    def _calculate_volume(self, audio_array):
+        """计算音量特征"""
+        try:
+            return np.abs(audio_array).mean()
+        except:
+            return 0
+
+    def _calculate_speed(self, audio_array):
+        """计算语速特征（基于过零率）"""
+        try:
+            zero_crossings = np.where(np.diff(np.signbit(audio_array)))[0]
+            return len(zero_crossings) / len(audio_array)
+        except:
+            return 0
+        
     async def compare_voiceprints(self, voiceprint1, voiceprint2):
         """比较两个声纹特征的相似度"""
         try:
@@ -125,7 +160,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
         """识别说话人"""
         try:
             # 提取当前音频的声纹特征
-            current_voiceprint = await self._extract_voice_features(audio_data)
+            current_voiceprint = self._extract_voice_features(audio_data)
             if current_voiceprint is None:
                 return None
 

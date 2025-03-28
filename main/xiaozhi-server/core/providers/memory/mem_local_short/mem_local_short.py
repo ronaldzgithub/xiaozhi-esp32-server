@@ -73,19 +73,31 @@ short_term_memory_prompt = """
 """
 
 def extract_json_data(json_code):
+    """提取并格式化JSON数据
+    Args:
+        json_code: 包含JSON的字符串，可能包含markdown代码块或多余的空格
+    Returns:
+        格式化后的JSON字符串
+    """
+    # 首先尝试查找markdown代码块
     start = json_code.find("```json")
-    # 从start开始找到下一个```结束
-    end = json_code.find("```", start+1)
-    #print("start:", start, "end:", end)
-    if start == -1 or end == -1:
-        try:
-            jsonData = json.loads(json_code)
-            return json_code
-        except Exception as e:
-            print("Error:", e)
-        return ""
-    jsonData = json_code[start+7:end]
-    return jsonData
+    if start == -1:
+        start = json_code.find("``` json")
+    
+    if start != -1:
+        # 从start开始找到下一个```结束
+        end = json_code.find("```", start+1)
+        if end != -1:
+            json_code = json_code[start+7:end]
+    
+    try:
+        # 尝试解析JSON
+        json_data = json.loads(json_code)
+        # 重新格式化JSON，确保没有多余的空格和换行
+        return json.dumps(json_data, ensure_ascii=False)
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"Error parsing JSON: {e}")
+        return json_code
 
 TAG = __name__
 logger = setup_logging()
@@ -96,7 +108,10 @@ class MemoryProvider(MemoryProviderBase):
         self.memory_dir = config.get("memory_dir", "data/memory")
         self.ensure_memory_dir()
         self.memory_file = os.path.join(self.memory_dir, "memory.json")
+        self.memory_path = os.path.join(self.memory_dir, "short_memory.yaml")
         self.memory = self.load_memory()
+        self.device_id = None
+        self.role_id = self.load_last_role_id()
         self.short_memory = []
 
     def ensure_memory_dir(self):
@@ -115,7 +130,40 @@ class MemoryProvider(MemoryProviderBase):
                 return {}
         return {}
 
-    def add_memory(self, messages, metadata, speaker_id=None):
+    def load_last_role_id(self):
+        """加载上次使用的device_id和role_id"""
+        try:
+            if os.path.exists(self.memory_path):
+                with open(self.memory_path, 'r', encoding='utf-8') as f:
+                    all_memory = yaml.safe_load(f) or {}
+                    if all_memory:
+                        # 获取最新的device_id（按最后更新时间排序）
+                        device_ids = sorted(
+                            all_memory.items(),
+                            key=lambda x: x[1].get('last_updated', ''),
+                            reverse=True
+                        )
+                        if device_ids:
+                            last_device_id = device_ids[0][0]
+                            device_data = device_ids[0][1]
+                            # 获取该设备下最新的role_id
+                            if 'roles' in device_data:
+                                roles = sorted(
+                                    device_data['roles'].items(),
+                                    key=lambda x: x[1].get('last_updated', ''),
+                                    reverse=True
+                                )
+                                if roles:
+                                    last_role_id = roles[0][0]
+                                    # 加载对应的记忆
+                                    self.short_memory = roles[0][1].get('short_memory', [])
+                                    logger.bind(tag=TAG).info(f"Loaded memory for device_id: {last_device_id}, role_id: {last_role_id}")
+                                    return last_device_id, last_role_id
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"加载上次device_id和role_id失败: {e}")
+        return None, None
+
+    async def add_memory(self, messages, metadata, speaker_id=None):
         """添加记忆"""
         try:
             # 获取当前时间戳
@@ -155,18 +203,18 @@ class MemoryProvider(MemoryProviderBase):
             logger.bind(tag=TAG).error(f"添加记忆失败: {e}")
             return False
 
-    def get_memory(self, speaker_id=None):
+    async def get_memory(self, speaker_id=None)->str:
         """获取记忆"""
         try:
             if speaker_id:
                 # 获取特定说话人的记忆
-                return self.get_speaker_memory(speaker_id)
+                return ''.join([str(item) for item in self.get_speaker_memory(speaker_id)])
             else:
                 # 获取全局记忆
-                return self.memory.get("global", [])
+                return ''.join([str(item) for item in self.memory.get("global", [])])
         except Exception as e:
             logger.bind(tag=TAG).error(f"获取记忆失败: {e}")
-            return []
+            return ""
 
     def clear_memory(self, speaker_id=None):
         """清除记忆"""
@@ -195,28 +243,93 @@ class MemoryProvider(MemoryProviderBase):
         """获取所有说话人ID"""
         return [k for k in self.memory.keys() if k != "global"]
 
-    def init_memory(self, role_id, llm):
-        super().init_memory(role_id, llm)
-        self.load_memory()
+    def init_memory(self, device_id, llm):
+        """初始化记忆系统
+        Args:
+            device_id: 设备ID
+            llm: LLM provider实例
+        """
+        if llm is None:
+            logger.bind(tag=TAG).error("LLM provider is required for memory system")
+            return False
+        
+        self.device_id = device_id
+        self.llm = llm
+        
+        # 加载该设备下最新的role_id
+        try:
+            if os.path.exists(self.memory_path):
+                with open(self.memory_path, 'r', encoding='utf-8') as f:
+                    all_memory = yaml.safe_load(f) or {}
+                    if all_memory and device_id in all_memory:
+                        device_data = all_memory[device_id]
+                        if 'roles' in device_data:
+                            roles = sorted(
+                                device_data['roles'].items(),
+                                key=lambda x: x[1].get('last_updated', ''),
+                                reverse=True
+                            )
+                            if roles:
+                                self.role_id = roles[0][0]
+                                self.short_memory = roles[0][1].get('short_memory', [])
+                                logger.bind(tag=TAG).info(f"Loaded memory for device_id: {device_id}, role_id: {self.role_id}")
+                            else:
+                                logger.bind(tag=TAG).info(f"No existing roles found for device_id: {device_id}")
+                        else:
+                            logger.bind(tag=TAG).info(f"No roles data found for device_id: {device_id}")
+                    else:
+                        logger.bind(tag=TAG).info(f"No existing memory found for device_id: {device_id}")
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"Error loading memory for device_id {device_id}: {e}")
+        
+        return True
     
     def save_memory_to_file(self):
-        all_memory = {}
-        if os.path.exists(self.memory_path):
-              with open(self.memory_path, 'r', encoding='utf-8') as f:
-                  all_memory = yaml.safe_load(f) or {}
-        all_memory[self.role_id] = self.short_memory
-        with open(self.memory_path, 'w', encoding='utf-8') as f:
-            yaml.dump(all_memory, f, allow_unicode=True)
+        """保存记忆到文件，包括device_id、role_id和记忆内容"""
+        try:
+            all_memory = {}
+            if os.path.exists(self.memory_path):
+                with open(self.memory_path, 'r', encoding='utf-8') as f:
+                    all_memory = yaml.safe_load(f) or {}
+            
+            # 保存当前device_id和role_id的记忆
+            if self.device_id and self.role_id:
+                current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                
+                # 初始化设备数据结构
+                if self.device_id not in all_memory:
+                    all_memory[self.device_id] = {
+                        "roles": {},
+                        "last_updated": current_time
+                    }
+                
+                # 更新设备下的角色记忆
+                all_memory[self.device_id]["roles"][self.role_id] = {
+                    "short_memory": self.short_memory,
+                    "last_updated": current_time
+                }
+                
+                # 更新设备的最后更新时间
+                all_memory[self.device_id]["last_updated"] = current_time
+                
+                # 保存到文件
+                with open(self.memory_path, 'w', encoding='utf-8') as f:
+                    yaml.dump(all_memory, f, allow_unicode=True)
+                logger.bind(tag=TAG).info(f"Memory saved for device_id: {self.device_id}, role_id: {self.role_id}")
+            else:
+                logger.bind(tag=TAG).warning("No device_id or role_id available, skipping memory save")
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
         
-    def save_memory(self, msgs=None):
+    async def save_memory(self, msgs=None):
         """异步保存记忆"""
-        if self.llm is None:
-            logger.bind(tag=TAG).error("LLM is not set for memory provider")
+        if not hasattr(self, 'llm') or self.llm is None:
+            logger.bind(tag=TAG).error("LLM provider not initialized. Please call init_memory first.")
             return None
         
         # 如果 msgs 为 None，清除所有记忆
         if msgs is None:
-            self.short_memory = ""
+            self.short_memory = [""]  # 设置为包含空字符串的列表
             self.save_memory_to_file()
             logger.bind(tag=TAG).info(f"Clear all memory - Role: {self.role_id}")
             return None
@@ -226,26 +339,63 @@ class MemoryProvider(MemoryProviderBase):
         
         msgStr = ""
         for msg in msgs:
-            if msg.role == "user":
-                msgStr += f"User: {msg.content}\n"
-            elif msg.role== "assistant":
-                msgStr += f"Assistant: {msg.content}\n"
+            if isinstance(msg, dict):
+                if msg['role'] == "user":
+                    content = msg['content']
+                    if isinstance(content, list):
+                        content = ' '.join(content)
+                    msgStr += f"User: {content}\n"
+                elif msg['role'] == "assistant":
+                    content = msg['content']
+                    if isinstance(content, list):
+                        content = ' '.join(content)
+                    msgStr += f"Assistant: {content}\n"
+            else:
+                content = msg.content
+                if isinstance(content, list):
+                    content = ' '.join(content)
+                msgStr += f"{msg.role}: {content}\n"
         if len(self.short_memory) > 0:
             msgStr+="历史记忆：\n"
-            msgStr+=self.short_memory
+            msgStr += "\n".join(self.short_memory)  # 将列表转换为字符串，元素之间用换行符分隔
         
         #当前时间
         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         msgStr += f"当前时间：{time_str}"
 
-        result = self.llm.response_no_stream(short_term_memory_prompt, msgStr)
- 
-        json_str = extract_json_data(result)
+        # 构建正确的消息格式
+        messages = [
+            {"role": "system", "content": short_term_memory_prompt},
+            {"role": "user", "content": msgStr}
+        ]
+        
         try:
-            json_data = json.loads(json_str) # 检查json格式是否正确
-            self.short_memory = json_str
+            logger.bind(tag=TAG).info(f"Preparing to call LLM response with messages: {messages}")
+            logger.bind(tag=TAG).info(f"LLM type: {type(self.llm)}")
+            logger.bind(tag=TAG).info(f"LLM methods: {dir(self.llm)}")
+            
+            # 检查response方法是否存在
+            if not hasattr(self.llm, 'response'):
+                logger.bind(tag=TAG).error("LLM provider does not have response method")
+                self.short_memory = [""]
+                return None
+                
+            result = [part async for part in self.llm.response(None, messages)]
+            logger.bind(tag=TAG).info(f"LLM response received: {result}")
+            
+            json_str = extract_json_data(" ".join(result))
+            try:
+                json_data = json.loads(json_str)  # 检查json格式是否正确
+                self.short_memory = [json_str]  # 保存为包含单个字符串的列表
+                logger.bind(tag=TAG).info("Successfully parsed and saved JSON memory")
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"Error parsing JSON: {e}")
+                self.short_memory = [json_str]  # 出错时设置为包含空字符串的列表
         except Exception as e:
-            print("Error:", e)
+            logger.bind(tag=TAG).error(f"LLM调用失败: {e}")
+            logger.bind(tag=TAG).error(f"Exception type: {type(e)}")
+            logger.bind(tag=TAG).error(f"Exception traceback: {e.__traceback__}")
+            self.short_memory = [""]  # 出错时设置为包含空字符串的列表
         
         self.save_memory_to_file()
         logger.bind(tag=TAG).info(f"Save memory successful - Role: {self.role_id}")
@@ -253,4 +403,4 @@ class MemoryProvider(MemoryProviderBase):
         return self.short_memory
     
     async def query_memory(self, query: str)-> str:
-        return self.short_memory
+        return "\n".join(self.short_memory) if self.short_memory else ""

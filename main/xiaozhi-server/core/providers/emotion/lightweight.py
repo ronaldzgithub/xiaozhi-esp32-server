@@ -77,8 +77,15 @@ class EmotionProvider(EmotionProviderBase):
                 return None
 
             # 将音频数据转换为bytearray
-            if not isinstance(audio_data, bytearray):
+            if isinstance(audio_data, list):
+                # 如果是列表，将所有音频数据连接起来
+                audio_data = bytearray().join(audio_data)
+            elif isinstance(audio_data, bytes):
                 audio_data = bytearray(audio_data)
+                
+            if not isinstance(audio_data, bytearray):
+                self.logger.bind(tag=TAG).error(f"不支持的音频数据类型: {type(audio_data)}")
+                return None
 
             # 确保数据长度是偶数（对于int16）
             if len(audio_data) % 2 != 0:

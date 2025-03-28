@@ -20,7 +20,7 @@ class LLMProvider(LLMProviderBase):
         check_model_key("LLM", self.api_key)
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url)
 
-    def response(self, session_id, dialogue):
+    async def response(self, session_id, dialogue):
         try:
             responses = self.client.chat.completions.create(
                 model=self.model_name,
@@ -53,6 +53,7 @@ class LLMProvider(LLMProviderBase):
 
     def response_with_functions(self, session_id, dialogue, functions=None):
         try:
+
             stream = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=dialogue,

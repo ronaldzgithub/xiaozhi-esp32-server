@@ -9,7 +9,7 @@ class MemoryProvider(MemoryProviderBase):
     def __init__(self, config):
         super().__init__(config)
       
-    async def save_memory(self, msgs):
+    def save_memory(self, msgs):
         logger.bind(tag=TAG).debug("nomem mode: No memory saving is performed.")
         return None
 

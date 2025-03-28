@@ -6,7 +6,7 @@ logger = setup_logging()
 
 class LLMProviderBase(ABC):
     @abstractmethod
-    def response(self, session_id, dialogue):
+    async def response(self, session_id, dialogue):
         """LLM response generator"""
         pass
 

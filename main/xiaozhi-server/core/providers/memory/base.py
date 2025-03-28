@@ -7,6 +7,7 @@ logger = setup_logging()
 class MemoryProviderBase(ABC):
     def __init__(self, config):
         self.config = config
+        self.device_id = None
         self.role_id = None
         self.llm = None
         self.speaker_memories = {}  # 存储每个说话人的记忆
@@ -20,18 +21,19 @@ class MemoryProviderBase(ABC):
     async def query_memory(self, query: str) -> str:
         """Query memories for specific role based on similarity"""
         return "please implement query method"
-
-    def init_memory(self, role_id, llm):
-        self.role_id = role_id    
+    
+    @abstractmethod
+    def init_memory(self, device_id, llm):
+        self.device_id = device_id    
         self.llm = llm
 
     @abstractmethod
-    def add_memory(self, messages, metadata, speaker_id=None):
+    async def add_memory(self, messages, metadata, speaker_id=None):
         """添加记忆"""
         pass
 
     @abstractmethod
-    def get_memory(self, speaker_id=None):
+    async def get_memory(self, speaker_id=None):
         """获取记忆"""
         pass
 
@@ -40,13 +42,15 @@ class MemoryProviderBase(ABC):
         """清除记忆"""
         pass
 
-    def get_speaker_memory(self, speaker_id):
+    def get_speaker_memory(self, speaker_id)->list:
         """获取特定说话人的记忆"""
         if speaker_id not in self.speaker_memories:
             self.speaker_memories[speaker_id] = []
         return self.speaker_memories[speaker_id]
 
     def add_speaker_memory(self, speaker_id, memory):
+        if not isinstance(memory, list):
+            memory = [memory]
         """添加特定说话人的记忆"""
         if speaker_id not in self.speaker_memories:
             self.speaker_memories[speaker_id] = []
