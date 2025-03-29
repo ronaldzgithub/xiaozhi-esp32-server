@@ -851,12 +851,19 @@ class ConnectionHandler:
 
             # 发送音频响应
             await self.send_audio_response(tts_file)
+
+
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
-            self.logger.bind(tag=TAG).error(f"错误详情: {str(e)}")
-            self.logger.bind(tag=TAG).error(f"错误类型: {type(e)}")
-            if hasattr(e, '__traceback__'):
-                self.logger.bind(tag=TAG).error(f"堆栈跟踪: {e.__traceback__}")
+            self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}，重试中")
+            try:
+                future = self.executor.submit(self.speak_and_play, text, 0)
+                self.tts_queue.put(future)
+            except Exception as e:                   
+                self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
+                self.logger.bind(tag=TAG).error(f"错误详情: {str(e)}")
+                self.logger.bind(tag=TAG).error(f"错误类型: {type(e)}")
+                if hasattr(e, '__traceback__'):
+                    self.logger.bind(tag=TAG).error(f"堆栈跟踪: {e.__traceback__}")
 
     async def check_proactive_dialogue(self):
         """检查是否需要发起主动对话"""
@@ -890,9 +897,17 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).error(f"主动对话检查任务出错: {e}")
                 await asyncio.sleep(self.config.get("silence_threshold", 60))  # 出错后等待配置的时间间隔再试
 
-    async def handle_audio_message(self, audio, text, speaker_id):
+    async def handle_audio_message(self, audio, text, speaker_id)->bool:
+        """
+        处理音频消息，返回如果为False，则会话不用继续了。如果True，则会话继续。
+        """
         """处理音频消息"""
         try:
+            # 检查是否是新用户
+            if speaker_id not in self.memory.user_memories:
+                response = "你好呀， 能介绍下你自己吗"#，年龄，职业，兴趣这些"
+                await self.send_text_response(response)
+                return False
 
             # 处理管理员声纹设置和验证
             if self.private_config:
@@ -905,11 +920,11 @@ class ConnectionHandler:
                             self.private_config.set_admin_voiceprint(voiceprint)
                             response = "管理员声纹已设置完成。从现在开始，只有您的声音才能进行管理员操作。"
                             await self.send_text_response(response)
-                            return
+                            return False
                     else:
                         response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说'好的'来确认。"
                         await self.send_text_response(response)
-                        return
+                        return False
                 else:
                     # 验证是否为管理员声纹
                     voiceprint = await self.voiceprint.extract_voiceprint(audio)
@@ -919,11 +934,13 @@ class ConnectionHandler:
                         
             self.logger.bind(tag=TAG).info(f"管理员声纹设置和验证")
 
-            await self.handle_text_message(text)
+            return await self.handle_text_message(text)
 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
-
+        
+        return True
+    
     async def handle_text_message(self, text):
         """处理文本消息"""
         try:
@@ -932,8 +949,8 @@ class ConnectionHandler:
                 if text == "设置完毕":
                     self.family_wizard.finish_setup()
                     await self.send_text_response("家庭成员设置已完成。")
-                    return
-                return
+                    return False
+                return False
 
             # 检查是否是设置家庭成员的指令
             if text == "设置家庭成员":
@@ -942,10 +959,10 @@ class ConnectionHandler:
                     member_name = self.family_wizard.get_next_member_name()
                     self.family_manager.start_adding_member(member_name)
                     await self.send_text_response("请让第一个成员说一句话，我会记录他的声纹。")
-                    return
+                    return False
                 else:
                     await self.send_text_response("抱歉，只有管理员才能设置家庭成员。")
-                    return
+                    return False
 
             # 检查是否在创建角色模式
             if self.is_creating_role and self.role_wizard:
@@ -954,7 +971,8 @@ class ConnectionHandler:
                     await self.send_text_response(response)
                     if "角色创建成功" in response:
                         self.is_creating_role = False
-                    return
+                    await self.send_text_response("抱歉，只有管理员才能设置家庭成员。")
+                    return False
 
             # 检查是否是创建角色的指令
             if text == "增加一个角色" or text == "创建一个角色":
@@ -962,60 +980,15 @@ class ConnectionHandler:
                     self.is_creating_role = True
                     response = self.role_wizard.start_creation()
                     await self.send_text_response(response)
-                    return
+                    return False
                 else:
                     await self.send_text_response("抱歉，只有管理员才能创建角色。")
-                    return
-
-            # 使用意图识别处理消息
-            if self.use_function_call_mode:
-                await self.chat_with_function_calling(text)
-            else:
-                # 使用意图识别
-                intent_result = self.intent.recognize(text)
-                if intent_result:
-                    # 处理意图
-                    if intent_result.get("intent") == "family_member_setup":
-                        if self.private_config and self.private_config.is_in_admin_mode():
-                            self.family_wizard.start_setup()
-                            member_name = self.family_wizard.get_next_member_name()
-                            self.family_manager.start_adding_member(member_name)
-                            await self.send_text_response("请让第一个成员说一句话，我会记录他的声纹。")
-                            return
-                        else:
-                            await self.send_text_response("抱歉，只有管理员才能设置家庭成员。")
-                            return
-                    elif intent_result.get("intent") == "role_creation":
-                        if self.private_config and self.private_config.is_in_admin_mode():
-                            self.is_creating_role = True
-                            response = self.role_wizard.start_creation()
-                            await self.send_text_response(response)
-                            return
-                        else:
-                            await self.send_text_response("抱歉，只有管理员才能创建角色。")
-                            return
-                    elif intent_result.get("intent") == "self_introduction":
-                        # 提取用户信息
-                        user_info = intent_result.get("user_info", {})
-                        user_name = user_info.get("name", "用户")
-                        
-                        # 获取当前说话人的ID
-                        speaker_id = None
-                        if hasattr(self, 'current_speaker_id'):
-                            speaker_id = self.current_speaker_id
-                        
-                        # 调用自我介绍函数
-                        from plugins_func.functions.self_introduction import self_introduction
-                        result = self_introduction(self, user_name, speaker_id, user_info)
-                        if result.action == Action.RESPONSE:
-                            await self.send_text_response(result.response)
-                        return
-                    else:
-                        # 处理其他意图
-                        await self.handle_normal_chat(text)
-                else:
-                    # 如果没有识别到意图，进行普通对话
-                    await self.handle_normal_chat(text)
+                    return False    
+                
+            return await self.handle_normal_chat(text)
 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理文本消息失败: {e}")
+            return False
+        
+        return True
