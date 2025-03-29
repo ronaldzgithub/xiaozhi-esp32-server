@@ -52,6 +52,7 @@ class FunctionHandler:
         self.function_registry.register_function("get_time")
         self.function_registry.register_function("get_lunar")
         self.function_registry.register_function("handle_device")
+        self.function_registry.register_function("self_introduction")
 
     def register_config_functions(self):
         """注册配置中的函数,可以不同客户端使用不同的配置"""
@@ -92,10 +93,6 @@ class FunctionHandler:
                         action=Action.RESPONSE,
                         response="抱歉，这个操作需要管理员权限。请使用管理员声纹进行验证。"
                     )
-
-            
-
-
             # 处理函数调用
             if function_name in self.functions:
                 function = self.functions[function_name]

@@ -113,6 +113,7 @@ class MemoryProvider(MemoryProviderBase):
         self.device_id = None
         self.role_id = self.load_last_role_id()
         self.short_memory = []
+        self.user_memories = {}  # 添加用户记忆字典
 
     def ensure_memory_dir(self):
         """确保记忆目录存在"""
@@ -157,6 +158,7 @@ class MemoryProvider(MemoryProviderBase):
                                     last_role_id = roles[0][0]
                                     # 加载对应的记忆
                                     self.short_memory = roles[0][1].get('short_memory', [])
+                                    self.user_memories = roles[0][1].get('user_memories', {})  # 加载用户记忆
                                     logger.bind(tag=TAG).info(f"Loaded memory for device_id: {last_device_id}, role_id: {last_role_id}")
                                     return last_device_id, last_role_id
         except Exception as e:
@@ -177,27 +179,27 @@ class MemoryProvider(MemoryProviderBase):
             }
             
             if speaker_id:
-                # 如果是特定说话人，添加到说话人记忆
-                self.add_speaker_memory(speaker_id, memory_data)
-                
-                # 更新说话人统计信息
-                if speaker_id not in self.memory:
-                    self.memory[speaker_id] = {
+                # 如果是特定说话人，添加到用户记忆
+                if speaker_id not in self.user_memories:
+                    self.user_memories[speaker_id] = {
                         "created_at": timestamp,
                         "last_seen": timestamp,
                         "interaction_count": 0,
-                        "total_duration": 0
+                        "total_duration": 0,
+                        "memories": []
                     }
-                else:
-                    self.memory[speaker_id]["last_seen"] = timestamp
-                    self.memory[speaker_id]["interaction_count"] += 1
+                
+                # 更新用户记忆
+                self.user_memories[speaker_id]["last_seen"] = timestamp
+                self.user_memories[speaker_id]["interaction_count"] += 1
+                self.user_memories[speaker_id]["memories"].append(memory_data)
             else:
                 # 如果没有说话人ID，添加到全局记忆
                 if "global" not in self.memory:
                     self.memory["global"] = []
                 self.memory["global"].append(memory_data)
             
-            self.save_memory(messages)
+            self.save_memory_to_file()
             return True
         except Exception as e:
             logger.bind(tag=TAG).error(f"添加记忆失败: {e}")
@@ -208,7 +210,10 @@ class MemoryProvider(MemoryProviderBase):
         try:
             if speaker_id:
                 # 获取特定说话人的记忆
-                return ''.join([str(item) for item in self.get_speaker_memory(speaker_id)])
+                if speaker_id in self.user_memories:
+                    memories = self.user_memories[speaker_id].get("memories", [])
+                    return ''.join([str(item) for item in memories])
+                return ""
             else:
                 # 获取全局记忆
                 return ''.join([str(item) for item in self.memory.get("global", [])])
@@ -221,15 +226,14 @@ class MemoryProvider(MemoryProviderBase):
         try:
             if speaker_id:
                 # 清除特定说话人的记忆
-                self.clear_speaker_memory(speaker_id)
-                if speaker_id in self.memory:
-                    del self.memory[speaker_id]
+                if speaker_id in self.user_memories:
+                    del self.user_memories[speaker_id]
             else:
                 # 清除所有记忆
                 self.memory = {}
-                self.speaker_memories = {}
+                self.user_memories = {}
             
-            self.save_memory()
+            self.save_memory_to_file()
             return True
         except Exception as e:
             logger.bind(tag=TAG).error(f"清除记忆失败: {e}")
@@ -237,11 +241,18 @@ class MemoryProvider(MemoryProviderBase):
 
     def get_speaker_stats(self, speaker_id):
         """获取说话人统计信息"""
-        return self.memory.get(speaker_id, {})
+        if speaker_id in self.user_memories:
+            return {
+                "created_at": self.user_memories[speaker_id].get("created_at"),
+                "last_seen": self.user_memories[speaker_id].get("last_seen"),
+                "interaction_count": self.user_memories[speaker_id].get("interaction_count", 0),
+                "total_duration": self.user_memories[speaker_id].get("total_duration", 0)
+            }
+        return None
 
     def get_all_speakers(self):
         """获取所有说话人ID"""
-        return [k for k in self.memory.keys() if k != "global"]
+        return list(self.user_memories.keys())
 
     def init_memory(self, device_id, llm):
         """初始化记忆系统
@@ -272,6 +283,7 @@ class MemoryProvider(MemoryProviderBase):
                             if roles:
                                 self.role_id = roles[0][0]
                                 self.short_memory = roles[0][1].get('short_memory', [])
+                                self.user_memories = roles[0][1].get('user_memories', {})  # 加载用户记忆
                                 logger.bind(tag=TAG).info(f"Loaded memory for device_id: {device_id}, role_id: {self.role_id}")
                             else:
                                 logger.bind(tag=TAG).info(f"No existing roles found for device_id: {device_id}")
@@ -306,6 +318,7 @@ class MemoryProvider(MemoryProviderBase):
                 # 更新设备下的角色记忆
                 all_memory[self.device_id]["roles"][self.role_id] = {
                     "short_memory": self.short_memory,
+                    "user_memories": self.user_memories,  # 添加用户记忆
                     "last_updated": current_time
                 }
                 
@@ -403,4 +416,86 @@ class MemoryProvider(MemoryProviderBase):
         return self.short_memory
     
     async def query_memory(self, query: str)-> str:
-        return "\n".join(self.short_memory) if self.short_memory else ""
+        return "\n".join(self.short_memory) if self.short_memory else ""   
+
+    def add_user_memory(self, speaker_id: str, user_memory: dict):
+        """添加用户记忆
+        Args:
+            speaker_id: 说话人ID（声纹ID）
+            user_memory: 用户记忆数据
+        """
+        try:
+            # 更新或添加用户记忆
+            self.user_memories[speaker_id] = user_memory
+            
+            # 记录日志
+            logger.bind(tag=TAG).info(f"添加用户记忆: {speaker_id}")
+            
+            # 保存到持久化存储
+            self.save_memory_to_file()
+            
+            return True
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"添加用户记忆失败: {e}")
+            return False
+
+    def get_user_memory(self, speaker_id: str) -> dict:
+        """获取用户记忆
+        Args:
+            speaker_id: 说话人ID（声纹ID）
+        Returns:
+            用户记忆数据
+        """
+        try:
+            if speaker_id in self.user_memories:
+                return self.user_memories[speaker_id]
+            return None
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"获取用户记忆失败: {e}")
+            return None
+
+    def update_user_memory(self, speaker_id: str, update_data: dict):
+        """更新用户记忆
+        Args:
+            speaker_id: 说话人ID（声纹ID）
+            update_data: 要更新的数据
+        """
+        try:
+            if speaker_id in self.user_memories:
+                # 更新用户记忆
+                self.user_memories[speaker_id].update(update_data)
+                
+                # 记录日志
+                logger.bind(tag=TAG).info(f"更新用户记忆: {speaker_id}")
+                
+                # 保存到持久化存储
+                self.save_memory_to_file()
+                
+                return True
+            return False
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"更新用户记忆失败: {e}")
+            return False
+
+    def delete_user_memory(self, speaker_id: str):
+        """删除用户记忆
+        Args:
+            speaker_id: 说话人ID（声纹ID）
+        """
+        try:
+            if speaker_id in self.user_memories:
+                # 删除用户记忆
+                del self.user_memories[speaker_id]
+                
+                # 记录日志
+                logger.bind(tag=TAG).info(f"删除用户记忆: {speaker_id}")
+                
+                # 保存到持久化存储
+                self.save_memory_to_file()
+                
+                return True
+            return False
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"删除用户记忆失败: {e}")
+            return False
+

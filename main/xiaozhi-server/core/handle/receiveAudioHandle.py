@@ -65,49 +65,7 @@ async def handleAudioMessage(conn, audio):
                     emotion = await conn.emotion.detect_emotion(conn.asr_audio, text)
                     logger.bind(tag=TAG).info(f"识别到情感: {emotion}")
 
-                # 处理角色创建流程
-                if conn.is_creating_role and conn.role_wizard:
-                    response = conn.role_wizard.process_answer(text)
-                    if response:
-                        await conn.send_text_response(response)
-                        if "角色创建成功" in response:
-                            conn.is_creating_role = False
-                        return
-                logger.bind(tag=TAG).info(f"角色创建流程")
-
-                # 处理管理员命令
-                if conn.private_config and conn.private_config.is_in_admin_mode():
-                    if "增加一个角色" in text or "创建一个角色" in text:
-                        conn.is_creating_role = True
-                        response = conn.role_wizard.start_creation()
-                        await conn.send_text_response(response)
-                        return
-                logger.bind(tag=TAG).info(f"管理员命令")
-
-                # 处理管理员声纹设置和验证
-                if conn.private_config:
-                    if not conn.private_config.is_admin_voiceprint_set():
-                        # 如果是第一次连接，请求设置管理员声纹
-                        if text.lower() in ["好的", "可以", "确认"]:
-                            # 提取声纹特征
-                            voiceprint = await conn.voiceprint.extract_voiceprint(audio)
-                            if voiceprint is not None:
-                                conn.private_config.set_admin_voiceprint(voiceprint)
-                                response = "管理员声纹已设置完成。从现在开始，只有您的声音才能进行管理员操作。"
-                                await conn.send_text_response(response)
-                                return
-                        else:
-                            response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说'好的'来确认。"
-                            await conn.send_text_response(response)
-                            return
-                    else:
-                        # 验证是否为管理员声纹
-                        voiceprint = await conn.voiceprint.extract_voiceprint(audio)
-                        if voiceprint is not None and conn.private_config.verify_admin_voiceprint(voiceprint):
-                            conn.private_config.enter_admin_mode()
-                            logger.bind(tag=TAG).info("进入管理员模式")
-                            
-                logger.bind(tag=TAG).info(f"管理员声纹设置和验证")
+                await conn.handle_audio_message(conn.asr_audio,text,speaker_id)
 
                 # 记忆系统处理
                 if conn.memory:

@@ -594,7 +594,6 @@ wakeup_words:
   - "喵喵同学"
   - "小滨小滨"
   - "小冰小冰"
-<<<<<<< HEAD
 
 # 情感识别配置
 Emotion:
@@ -642,5 +641,3 @@ Voiceprint:
   feature_threshold: 0.8
   storage_dir: data/voiceprints
   cache_duration: 3600  # 声纹特征缓存时间(秒)
-=======
->>>>>>> upstream/main

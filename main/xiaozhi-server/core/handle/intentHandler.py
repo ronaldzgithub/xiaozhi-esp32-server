@@ -44,6 +44,8 @@ async def check_direct_exit(conn, text):
             return True
     return False
 
+
+
 async def handle_role_switch(conn, text):
     """处理角色切换意图"""
     # 检查是否是角色切换相关的文本
@@ -68,6 +70,10 @@ async def handle_role_switch(conn, text):
     role_list = "\n".join([f"{i+1}. {role['name']} - {role['description']}" for i, role in enumerate(roles)])
     response = f"好的，我们有以下角色可供选择：\n{role_list}\n请告诉我你想切换到哪个角色？"
     await send_stt_message(conn, response)
+    #await conn.send_text_response(response)
+    future = conn.executor.submit(conn.speak_and_play, response, 0)
+    conn.tts_queue.put(future)
+
     return True
 
 
@@ -84,7 +90,8 @@ async def switch_role(conn, role):
             
         # 发送角色切换成功的消息
         response = f"好的，我已经切换为{role['name']}。{role['description']}"
-        await send_stt_message(conn, response)
+        #await send_stt_message(conn, response)
+        await conn.send_text_response(response)
         return True
     except Exception as e:
         logger.bind(tag=TAG).error(f"切换角色失败: {e}")

@@ -22,7 +22,7 @@ from plugins_func.register import Action, ActionResponse
 from config.private_config import PrivateConfig
 from core.auth import AuthMiddleware, AuthenticationError
 from core.utils.auth_code_gen import AuthCodeGenerator
-from core.mcp.manager import MCPManager
+#from core.mcp.manager import MCPManager
 
 TAG = __name__
 
@@ -38,6 +38,7 @@ class ConnectionHandler:
         self.config = config
         self.logger = setup_logging()
         self.auth = AuthMiddleware(config)
+        self.proactive_check_task = None  # 添加主动对话检查任务
 
         # 添加情感识别模块
         emotion_cls_name = self.config["selected_module"].get("Emotion", "lightweight")
@@ -138,7 +139,7 @@ class ConnectionHandler:
         if self.config["selected_module"]["Intent"] == 'function_call':
             self.use_function_call_mode = True
         
-        self.mcp_manager = MCPManager(self)
+        #self.mcp_manager = MCPManager(self)
 
         # 添加角色管理
         try:
@@ -152,6 +153,19 @@ class ConnectionHandler:
             self.role_manager = None
             self.role_wizard = None
             self.is_creating_role = False
+
+        # 添加家庭成员管理
+        try:
+            from core.providers.family.family_manager import FamilyManager
+            from core.providers.family.family_wizard import FamilyMemberWizard
+            self.family_manager = FamilyManager(config)
+            self.family_wizard = FamilyMemberWizard(self.family_manager)
+            self.is_adding_family_member = False
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"家庭成员管理模块初始化失败: {e}")
+            self.family_manager = None
+            self.family_wizard = None
+            self.is_adding_family_member = False
 
     async def handle_connection(self, ws):
         try:
@@ -209,11 +223,27 @@ class ConnectionHandler:
             self.audio_play_priority_thread = threading.Thread(target=self._audio_play_priority_thread, daemon=True)
             self.audio_play_priority_thread.start()
 
+
+             # 音频播放 消化线程
+            self.proactive_thread = threading.Thread(target=self.start_proactive_check, daemon=True)
+            self.proactive_thread.start()
+
+            # 启动主动对话检查任务
+            self.proactive_check_task = asyncio.create_task(self.start_proactive_check())
+            
             try:
                 async for message in self.websocket:
                     await self._route_message(message)
             except websockets.exceptions.ConnectionClosed:
                 self.logger.bind(tag=TAG).info("客户端断开连接")
+            finally:
+                # 取消主动对话检查任务
+                if self.proactive_check_task:
+                    self.proactive_check_task.cancel()
+                    try:
+                        await self.proactive_check_task
+                    except asyncio.CancelledError:
+                        pass
 
         except AuthenticationError as e:
             self.logger.bind(tag=TAG).error(f"Authentication failed: {str(e)}")
@@ -324,6 +354,11 @@ class ConnectionHandler:
             self._check_and_broadcast_auth_code()
             return "请先完成设备验证。"
 
+        # 更新最后交互时间
+        if self.proactive:
+            current_time = time.time()
+            self.proactive.update_last_interaction(current_time)
+
         self.dialogue.put(Message(role="user", content=query))
 
         response_message = []
@@ -398,8 +433,21 @@ class ConnectionHandler:
                     "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
                 }))
         
+        # 更新用户兴趣和检查主动对话
+        if self.proactive:
+            # 使用 create_task 而不是 run_coroutine_threadsafe
+            self._update_interests_and_check_proactive()
+        
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
         return response_text
+
+    async def _update_interests_and_check_proactive(self):
+        """更新用户兴趣并检查是否需要主动对话"""
+        try:
+            await self.proactive.update_user_interests(self.dialogue.dialogue)
+            await self.check_proactive_dialogue()
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"更新兴趣和检查主动对话失败: {e}")
 
     def chat_with_function_calling(self, query, tool_call=False, emotion=None, speaker_id=None):
         self.logger.bind(tag=TAG).debug(f"Chat with function calling start: {query}")
@@ -409,6 +457,11 @@ class ConnectionHandler:
             future = asyncio.run_coroutine_threadsafe(self._check_and_broadcast_auth_code(), self.loop)
             future.result()
             return True
+
+        # 更新最后交互时间
+        if self.proactive:
+            current_time = time.time()
+            self.proactive.update_last_interaction(current_time)
 
         if not tool_call:
             self.dialogue.put(Message(role="user", content=query))
@@ -431,7 +484,8 @@ class ConnectionHandler:
             speaker_memory = future.result()
         
             memory_str+=(speaker_memory)
-
+            if speaker_id is not None:
+                memory_str += f"\当前说话人的音色id： {speaker_id}"
             
             llm_responses = self.llm.response_with_functions(
                 self.session_id,
@@ -563,6 +617,12 @@ class ConnectionHandler:
                     "timestamp": time.time(),
                     "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
                 }))
+            
+        
+        # 更新用户兴趣和检查主动对话
+        if self.proactive:
+            # 使用 create_task 而不是 run_coroutine_threadsafe
+            self.loop.create_task(self._update_interests_and_check_proactive())
 
         self.llm_finish_task = True
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
@@ -793,6 +853,10 @@ class ConnectionHandler:
             await self.send_audio_response(tts_file)
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
+            self.logger.bind(tag=TAG).error(f"错误详情: {str(e)}")
+            self.logger.bind(tag=TAG).error(f"错误类型: {type(e)}")
+            if hasattr(e, '__traceback__'):
+                self.logger.bind(tag=TAG).error(f"堆栈跟踪: {e.__traceback__}")
 
     async def check_proactive_dialogue(self):
         """检查是否需要发起主动对话"""
@@ -809,7 +873,149 @@ class ConnectionHandler:
             
             # 添加到对话历史并开始对话
             self.dialogue.put(Message(role="assistant", content=content))
-            await self.startToChat(content)
+            future = self.executor.submit(self.speak_and_play, content, 0)
+            self.tts_queue.put(future)
+            self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
             
             # 更新最后主动对话时间
             self.proactive.last_proactive_time = current_time
+
+    async def start_proactive_check(self):
+        """启动主动对话检查任务"""
+        while not self.stop_event.is_set():
+            try:
+                await self.check_proactive_dialogue()
+                await asyncio.sleep(self.config.get("silence_threshold", 60))  # 根据配置的时间间隔检查
+            except Exception as e:
+                self.logger.bind(tag=TAG).error(f"主动对话检查任务出错: {e}")
+                await asyncio.sleep(self.config.get("silence_threshold", 60))  # 出错后等待配置的时间间隔再试
+
+    async def handle_audio_message(self, audio, text, speaker_id):
+        """处理音频消息"""
+        try:
+
+            # 处理管理员声纹设置和验证
+            if self.private_config:
+                if not self.private_config.is_admin_voiceprint_set():
+                    # 如果是第一次连接，请求设置管理员声纹
+                    if text.lower() in ["好的", "可以", "确认"]:
+                        # 提取声纹特征
+                        voiceprint = await self.voiceprint.extract_voiceprint(audio)
+                        if voiceprint is not None:
+                            self.private_config.set_admin_voiceprint(voiceprint)
+                            response = "管理员声纹已设置完成。从现在开始，只有您的声音才能进行管理员操作。"
+                            await self.send_text_response(response)
+                            return
+                    else:
+                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说'好的'来确认。"
+                        await self.send_text_response(response)
+                        return
+                else:
+                    # 验证是否为管理员声纹
+                    voiceprint = await self.voiceprint.extract_voiceprint(audio)
+                    if voiceprint is not None and self.private_config.verify_admin_voiceprint(voiceprint):
+                        self.private_config.enter_admin_mode()
+                        self.logger.bind(tag=TAG).info("进入管理员模式")
+                        
+            self.logger.bind(tag=TAG).info(f"管理员声纹设置和验证")
+
+            await self.handle_text_message(text)
+
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
+
+    async def handle_text_message(self, text):
+        """处理文本消息"""
+        try:
+            # 检查是否在添加家庭成员模式
+            if self.family_wizard and self.family_wizard.is_in_setup_mode():
+                if text == "设置完毕":
+                    self.family_wizard.finish_setup()
+                    await self.send_text_response("家庭成员设置已完成。")
+                    return
+                return
+
+            # 检查是否是设置家庭成员的指令
+            if text == "设置家庭成员":
+                if self.private_config and self.private_config.is_in_admin_mode():
+                    self.family_wizard.start_setup()
+                    member_name = self.family_wizard.get_next_member_name()
+                    self.family_manager.start_adding_member(member_name)
+                    await self.send_text_response("请让第一个成员说一句话，我会记录他的声纹。")
+                    return
+                else:
+                    await self.send_text_response("抱歉，只有管理员才能设置家庭成员。")
+                    return
+
+            # 检查是否在创建角色模式
+            if self.is_creating_role and self.role_wizard:
+                response = self.role_wizard.process_answer(text)
+                if response:
+                    await self.send_text_response(response)
+                    if "角色创建成功" in response:
+                        self.is_creating_role = False
+                    return
+
+            # 检查是否是创建角色的指令
+            if text == "增加一个角色" or text == "创建一个角色":
+                if self.private_config and self.private_config.is_in_admin_mode():
+                    self.is_creating_role = True
+                    response = self.role_wizard.start_creation()
+                    await self.send_text_response(response)
+                    return
+                else:
+                    await self.send_text_response("抱歉，只有管理员才能创建角色。")
+                    return
+
+            # 使用意图识别处理消息
+            if self.use_function_call_mode:
+                await self.chat_with_function_calling(text)
+            else:
+                # 使用意图识别
+                intent_result = self.intent.recognize(text)
+                if intent_result:
+                    # 处理意图
+                    if intent_result.get("intent") == "family_member_setup":
+                        if self.private_config and self.private_config.is_in_admin_mode():
+                            self.family_wizard.start_setup()
+                            member_name = self.family_wizard.get_next_member_name()
+                            self.family_manager.start_adding_member(member_name)
+                            await self.send_text_response("请让第一个成员说一句话，我会记录他的声纹。")
+                            return
+                        else:
+                            await self.send_text_response("抱歉，只有管理员才能设置家庭成员。")
+                            return
+                    elif intent_result.get("intent") == "role_creation":
+                        if self.private_config and self.private_config.is_in_admin_mode():
+                            self.is_creating_role = True
+                            response = self.role_wizard.start_creation()
+                            await self.send_text_response(response)
+                            return
+                        else:
+                            await self.send_text_response("抱歉，只有管理员才能创建角色。")
+                            return
+                    elif intent_result.get("intent") == "self_introduction":
+                        # 提取用户信息
+                        user_info = intent_result.get("user_info", {})
+                        user_name = user_info.get("name", "用户")
+                        
+                        # 获取当前说话人的ID
+                        speaker_id = None
+                        if hasattr(self, 'current_speaker_id'):
+                            speaker_id = self.current_speaker_id
+                        
+                        # 调用自我介绍函数
+                        from plugins_func.functions.self_introduction import self_introduction
+                        result = self_introduction(self, user_name, speaker_id, user_info)
+                        if result.action == Action.RESPONSE:
+                            await self.send_text_response(result.response)
+                        return
+                    else:
+                        # 处理其他意图
+                        await self.handle_normal_chat(text)
+                else:
+                    # 如果没有识别到意图，进行普通对话
+                    await self.handle_normal_chat(text)
+
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"处理文本消息失败: {e}")
