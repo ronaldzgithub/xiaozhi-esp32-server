@@ -269,6 +269,7 @@ class ConnectionHandler:
                 
         self.prompt = roles[0]["prompt"]
         self.memory.set_r = roles[0]["name"]
+        self.memory.set_role_id(roles[0]["name"])
 
         if self.private_config:
             # 检查是否有保存的角色设置
@@ -287,7 +288,11 @@ class ConnectionHandler:
 
         """加载记忆"""
         device_id = self.headers.get("device-id", None)
-        self.memory.init_memory(device_id, self.llm)
+        #load 最近的一个role
+        self.memory.init_memory(device_id, None, self.llm)
+        #如果没有记录这个role，则使用默认的role
+        if self.memory.role_id is None:
+            self.memory.set_role_id(roles[0]["name"])
         
         """为意图识别设置LLM，优先使用专用LLM"""
         # 检查是否配置了专用的意图识别LLM
@@ -435,11 +440,7 @@ class ConnectionHandler:
                     "timestamp": time.time(),
                     "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
                 }))
-        
-        # 更新用户兴趣和检查主动对话
-        if self.proactive:
-            # 使用 create_task 而不是 run_coroutine_threadsafe
-            self._update_interests_and_check_proactive()
+
         
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
         return response_text
@@ -621,13 +622,8 @@ class ConnectionHandler:
                     "timestamp": time.time(),
                     "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
                 }))
-            
         
-        # 更新用户兴趣和检查主动对话
-        if self.proactive:
-            # 使用 create_task 而不是 run_coroutine_threadsafe
-            self.loop.create_task(self._update_interests_and_check_proactive())
-
+        # llm finish task is very important
         self.llm_finish_task = True
         self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
 
@@ -872,7 +868,6 @@ class ConnectionHandler:
         """检查是否需要发起主动对话"""
         if not self.proactive:
             return
-            
         
         current_time = time.time()
         if await self.proactive.should_initiate_dialogue(current_time, self):
@@ -881,30 +876,42 @@ class ConnectionHandler:
                 self.dialogue.dialogue,
                 self.proactive.user_interests
             )
-            self.llm_finish_task = True
-            # 添加到对话历史并开始对话
-            await send_stt_message(self, content)
             self.dialogue.put(Message(role="assistant", content=content))
-            future = self.executor.submit(self.speak_and_play, content,-1)
-            self.tts_queue.put(future)
-            self.asr_server_receive = True
-
-            self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
+            if await self.send_full_audio_message(content):
+                self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
             
             # 更新最后主动对话时间
             self.proactive.last_proactive_time = current_time
 
+
+    async def send_full_audio_message(self, content):
+
+         # 检查系统是否正在说话
+        if not self.asr_server_receive:
+            self.logger.bind(tag=TAG).debug(f"系统正在说话，skip sending content {content}")
+            return False
+        
+        """开始主动对话"""
+        # 添加到对话历史并开始对话
+        await send_stt_message(self, content)
+        future = self.executor.submit(self.speak_and_play, content,-1)
+        self.tts_queue.put(future)
+        self.llm_finish_task = True
+        self.asr_server_receive = True
+        self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
+
+        return True
+
     async def start_proactive_check(self):
         """启动主动对话检查任务"""
 
-        silence_threshold = self.config.get("Proactive", {}).get("lightweight", {}).get("silence_threshold", 60)
         while not self.stop_event.is_set():
             try:
                 await self.check_proactive_dialogue()
-                await asyncio.sleep(silence_threshold)  # 根据配置的时间间隔检查
+                await asyncio.sleep(self.proactive.config.get("silence_threshold", 60))  # 根据配置的时间间隔检查
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"主动对话检查任务出错: {e}")
-                await asyncio.sleep(silence_threshold)  # 出错后等待配置的时间间隔再试
+                await asyncio.sleep(self.proactive.config.get("silence_threshold", 60))  # 出错后等待配置的时间间隔再试
 
     async def handle_audio_message(self, audio, text, speaker_id)->bool:
         """
@@ -1004,3 +1011,54 @@ class ConnectionHandler:
             return False
         
         return True
+
+    def switch_role(self, role_name):
+
+        """切换角色"""
+        try:
+            # 1. 检查角色是否存在
+            roles = self.config.get("roles", [])
+            target_role = None
+            for role in roles:
+                if role["name"] == role_name:
+                    target_role = role
+                    break
+            
+            if not target_role:
+                self.logger.bind(tag=TAG).error(f"角色 {role_name} 不存在")
+                return False
+                
+            # 2. 更新系统提示词
+            new_prompt = target_role["prompt"].replace("{{assistant_name}}", role_name)
+            self.change_system_prompt(new_prompt)
+            
+            # 3. 更新记忆系统的角色
+            if self.memory:
+                self.memory.set_r = role_name
+                
+                # 重置记忆系统
+                device_id = self.headers.get("device-id", None)
+                self.memory.init_memory(device_id, role_name, self.llm)
+                self.memory.set_r = role_name
+                self.logger.bind(tag=TAG).info(f"角色切换为 {role_name}，记忆系统已重置")
+            
+            # 4. 更新私有配置中的当前角色
+            if self.private_config:
+                self.private_config.private_config["current_role"] = role_name
+                self.private_config.save()
+            
+            # 5. 清空当前对话历史
+            self.dialogue = Dialogue()
+            self.dialogue.put(Message(role="system", content=target_role["prompt"]))
+            
+            # 6. 重置主动对话状态
+            if self.proactive:
+                self.proactive.last_proactive_time = time.time()
+                self.proactive.interaction_count = 0
+            
+            self.logger.bind(tag=TAG).info(f"成功切换到角色: {role_name}")
+            return True
+            
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"切换角色失败: {e}")
+            return False

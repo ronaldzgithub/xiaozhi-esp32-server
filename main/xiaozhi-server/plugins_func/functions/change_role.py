@@ -54,27 +54,23 @@ change_role_function_desc = {
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "role_name": {
+                            "name": {
                                 "type": "string",
                                 "description": "要切换的角色名字"
-                            },
-                            "role":{
-                                "type": "string",
-                                "description": "要切换的角色的职业"
                             }
                         },
-                        "required": ["role","role_name"]
+                        "required": ["name"]
                     }
                 }
             }
 
 @register_function('change_role', change_role_function_desc, ToolType.CHANGE_SYS_PROMPT)
-def change_role(conn, role: str, role_name: str):
+def change_role(conn, name: str):
     """切换角色"""
-    if role not in prompts:
+    if name not in prompts:
         return ActionResponse(action=Action.RESPONSE, result="切换角色失败", response="不支持的角色")
-    new_prompt = prompts[role].replace("{{assistant_name}}", role_name)
-    conn.change_system_prompt(new_prompt)
-    logger.bind(tag=TAG).info(f"准备切换角色:{role},角色名字:{role_name}")
-    res = f"切换角色成功,我是{role}{role_name}"
+    conn.switch_role(name)
+    
+    logger.bind(tag=TAG).info(f"准备切换角色:{name}")
+    res = f"切换角色成功,我是{name}"
     return ActionResponse(action=Action.RESPONSE, result="切换角色已处理", response=res)

@@ -112,8 +112,7 @@ class MemoryProvider(MemoryProviderBase):
         self.memory = self.load_memory()
         self.device_id = None
         self.role_id = self.load_last_role_id()
-        self.short_memory = []
-        self.user_memories = {}  # 添加用户记忆字典
+        self.user_memories = {}  # 存储每个角色的用户记忆和短期记忆
 
     def ensure_memory_dir(self):
         """确保记忆目录存在"""
@@ -157,12 +156,12 @@ class MemoryProvider(MemoryProviderBase):
                                 if roles:
                                     last_role_id = roles[0][0]
                                     # 加载对应的记忆
-                                    self.short_memory = roles[0][1].get('short_memory', [])
-                                    self.user_memories = roles[0][1].get('user_memories', {})  # 加载用户记忆
+                                    self.user_memories = roles[0][1].get('user_memories', {})
                                     logger.bind(tag=TAG).info(f"Loaded memory for device_id: {last_device_id}, role_id: {last_role_id}")
                                     return last_role_id
         except Exception as e:
             logger.bind(tag=TAG).error(f"加载上次device_id和role_id失败: {e}")
+
         return None
 
     async def add_memory(self, messages, metadata, speaker_id=None):
@@ -212,7 +211,8 @@ class MemoryProvider(MemoryProviderBase):
                 # 获取特定说话人的记忆
                 if speaker_id in self.user_memories:
                     memories = self.user_memories[speaker_id].get("memories", [])
-                    return ''.join([str(item) for item in memories])
+                    short_memory = self.user_memories[speaker_id].get("short_memory", [])
+                    return ''.join([str(item) for item in memories]) + '\n' + f'{speaker_id}的身份如下：' + ''.join([str(item) for item in short_memory])
                 return ""
             else:
                 # 获取全局记忆
@@ -256,7 +256,7 @@ class MemoryProvider(MemoryProviderBase):
     
 
     
-    def init_memory(self, device_id, llm):
+    def init_memory(self, device_id, role_id, llm):
         """初始化记忆系统
         Args:
             device_id: 设备ID
@@ -267,9 +267,11 @@ class MemoryProvider(MemoryProviderBase):
             return False
         
         self.device_id = device_id
-        self.llm = llm
-        
-        # 加载该设备下最新的role_id
+        self.llm = llm 
+        self.role_id = role_id
+        # 初始化或加载短期记忆和用户记忆
+        self.user_memories = {}
+        # 加载该设备下最新的role_id或指定的role_id
         try:
             if os.path.exists(self.memory_path):
                 with open(self.memory_path, 'r', encoding='utf-8') as f:
@@ -282,13 +284,24 @@ class MemoryProvider(MemoryProviderBase):
                                 key=lambda x: x[1].get('last_updated', ''),
                                 reverse=True
                             )
-                            if roles:
-                                self.role_id = roles[0][0]
-                                self.short_memory = roles[0][1].get('short_memory', [])
-                                self.user_memories = roles[0][1].get('user_memories', {})  # 加载用户记忆
-                                logger.bind(tag=TAG).info(f"Loaded memory for device_id: {device_id}, role_id: {self.role_id}")
+                            if role_id is None:
+                                # 如果role_id是None，找到最近的一个
+                                if roles:
+                                    self.role_id = roles[0][0]
+                                    self.user_memories = roles[0][1].get('user_memories', {})
+                                    logger.bind(tag=TAG).info(f"Loaded memory for device_id: {device_id}, role_id: {self.role_id}")
+                                else:
+                                    logger.bind(tag=TAG).info(f"No existing roles found for device_id: {device_id}")
                             else:
-                                logger.bind(tag=TAG).info(f"No existing roles found for device_id: {device_id}")
+                                # 如果role_id不是None，找到对应的那一个
+                                for role in roles:
+                                    if role[0] == role_id:
+                                        self.role_id = role_id
+                                        self.user_memories = role[1].get('user_memories', {})
+                                        logger.bind(tag=TAG).info(f"Loaded memory for device_id: {device_id}, role_id: {self.role_id}")
+                                        break
+                                else:
+                                    logger.bind(tag=TAG).info(f"No existing role found for device_id: {device_id} with role_id: {role_id}")
                         else:
                             logger.bind(tag=TAG).info(f"No roles data found for device_id: {device_id}")
                     else:
@@ -319,7 +332,6 @@ class MemoryProvider(MemoryProviderBase):
                 
                 # 更新设备下的角色记忆
                 all_memory[self.device_id]["roles"][self.role_id] = {
-                    "short_memory": self.short_memory,
                     "user_memories": self.user_memories,  # 添加用户记忆
                     "last_updated": current_time
                 }
@@ -344,9 +356,11 @@ class MemoryProvider(MemoryProviderBase):
         
         # 如果 msgs 为 None，清除所有记忆
         if msgs is None:
-            self.short_memory = [""]  # 设置为包含空字符串的列表
+            for speaker_id in self.user_memories:
+                if "short_memory" in self.user_memories[speaker_id]:
+                    self.user_memories[speaker_id]["short_memory"] = [""]
             self.save_memory_to_file()
-            logger.bind(tag=TAG).info(f"Clear all memory - Role: {self.role_id}")
+            logger.bind(tag=TAG).info(f"Clear all memory")
             return None
         
         if len(msgs) < 2:
@@ -370,9 +384,33 @@ class MemoryProvider(MemoryProviderBase):
                 if isinstance(content, list):
                     content = ' '.join(content)
                 msgStr += f"{msg.role}: {content}\n"
-        if len(self.short_memory) > 0:
-            msgStr+="历史记忆：\n"
-            msgStr += "\n".join(self.short_memory)  # 将列表转换为字符串，元素之间用换行符分隔
+
+        # 获取当前说话人的短期记忆
+        speaker_id = None
+        for msg in msgs:
+            if isinstance(msg, dict):
+                if msg.get('metadata', {}).get('speaker_id'):
+                    speaker_id = msg['metadata']['speaker_id']
+                    break
+            elif hasattr(msg, 'metadata') and msg.metadata.get('speaker_id'):
+                speaker_id = msg.metadata['speaker_id']
+                break
+
+        if speaker_id:
+            if speaker_id not in self.user_memories:
+                self.user_memories[speaker_id] = {
+                    "created_at": time.time(),
+                    "last_seen": time.time(),
+                    "interaction_count": 0,
+                    "total_duration": 0,
+                    "memories": [],
+                    "short_memory": []
+                }
+            
+            short_memory = self.user_memories[speaker_id].get("short_memory", [])
+            if short_memory:
+                msgStr += "历史记忆：\n"
+                msgStr += "\n".join(short_memory)
         
         #当前时间
         time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -386,39 +424,37 @@ class MemoryProvider(MemoryProviderBase):
         
         try:
             logger.bind(tag=TAG).info(f"Preparing to call LLM response with messages: {messages}")
-            logger.bind(tag=TAG).info(f"LLM type: {type(self.llm)}")
-            logger.bind(tag=TAG).info(f"LLM methods: {dir(self.llm)}")
             
-            # 检查response方法是否存在
-            if not hasattr(self.llm, 'response'):
-                logger.bind(tag=TAG).error("LLM provider does not have response method")
-                self.short_memory = [""]
-                return None
-                
             result = [part async for part in self.llm.response(None, messages)]
             logger.bind(tag=TAG).info(f"LLM response received: {result}")
             
             json_str = extract_json_data(" ".join(result))
             try:
                 json_data = json.loads(json_str)  # 检查json格式是否正确
-                self.short_memory = [json_str]  # 保存为包含单个字符串的列表
-                logger.bind(tag=TAG).info("Successfully parsed and saved JSON memory")
+                # 更新当前说话人的短期记忆
+                if speaker_id:
+                    self.user_memories[speaker_id]["short_memory"] = [json_str]
+                    logger.bind(tag=TAG).info(f"Successfully parsed and saved JSON memory for speaker: {speaker_id}")
             except Exception as e:
                 logger.bind(tag=TAG).error(f"Error parsing JSON: {e}")
-                self.short_memory = [json_str]  # 出错时设置为包含空字符串的列表
+                if speaker_id:
+                    self.user_memories[speaker_id]["short_memory"] = [json_str]
         except Exception as e:
             logger.bind(tag=TAG).error(f"LLM调用失败: {e}")
-            logger.bind(tag=TAG).error(f"Exception type: {type(e)}")
-            logger.bind(tag=TAG).error(f"Exception traceback: {e.__traceback__}")
-            self.short_memory = [""]  # 出错时设置为包含空字符串的列表
+            if speaker_id:
+                self.user_memories[speaker_id]["short_memory"] = [""]
         
         self.save_memory_to_file()
-        logger.bind(tag=TAG).info(f"Save memory successful - Role: {self.role_id}")
+        logger.bind(tag=TAG).info(f"Save memory successful for speaker: {speaker_id}")
 
-        return self.short_memory
+        return self.user_memories.get(speaker_id, {}).get("short_memory", [])
     
-    async def query_memory(self, query: str)-> str:
-        return "\n".join(self.short_memory) if self.short_memory else ""   
+    async def query_memory(self, query: str, speaker_id: str = None)-> str:
+        """查询记忆"""
+        if speaker_id and speaker_id in self.user_memories:
+            short_memory = self.user_memories[speaker_id].get("short_memory", [])
+            return "\n".join(short_memory) if short_memory else ""
+        return ""
 
     def add_user_memory(self, speaker_id: str, user_memory: dict):
         """添加用户记忆

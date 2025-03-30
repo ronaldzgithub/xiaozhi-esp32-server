@@ -13,7 +13,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
         self.storage = VoiceprintStorage(config.get("storage_dir", "data/voiceprints"))
         self.current_speaker_id = None
         self.current_speaker_start_time = None
-        self.feature_threshold = config.get("feature_threshold", 0.8)  # 特征匹配阈值
+        self.feature_threshold = config.get("feature_threshold", 0.7)  # 特征匹配阈值
 
     def _is_valid_audio(self, audio_data):
         """检查音频数据是否有效"""
@@ -165,7 +165,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
                 return None
 
             # 遍历所有已存储的说话人
-            best_similarity = 0.0
+            best_similarity = 0
             best_speaker_id = None
             
             for speaker_id in self.storage.get_all_speakers():

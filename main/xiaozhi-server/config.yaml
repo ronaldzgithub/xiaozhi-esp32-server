@@ -69,6 +69,10 @@ stop_tts_notify_voice: "config/assets/tts_notify.mp3"
 CMD_exit:
   - "退出"
   - "关闭"
+  - "退下"
+  - "关机"
+  - "闭嘴"
+  - "安静"
 
 # 具体处理时选择的模块(The module selected for specific processing)
 selected_module:
@@ -635,9 +639,10 @@ Proactive:
 
 # 声纹识别配置
 Voiceprint:
-  enabled: true
-  provider: lightweight
-  feature_dim: 128
-  feature_threshold: 0.8
-  storage_dir: data/voiceprints
-  cache_duration: 3600  # 声纹特征缓存时间(秒)
+  lightweight:
+    enabled: true
+    provider: lightweight
+    feature_dim: 128
+    feature_threshold: 0.7
+    storage_dir: data/voiceprints
+    cache_duration: 3600  # 声纹特征缓存时间(秒)

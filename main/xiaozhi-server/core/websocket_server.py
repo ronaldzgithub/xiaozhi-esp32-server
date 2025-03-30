@@ -31,7 +31,7 @@ class WebSocketServer:
         mem = memory.create_instance(memory_cls_name, memory_cfg)
 
         
-        mem.init_memory(None, l_llm)
+        mem.init_memory(None, None, l_llm)
 
         """创建处理模块实例"""
         return (

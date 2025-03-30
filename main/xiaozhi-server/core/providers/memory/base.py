@@ -23,8 +23,9 @@ class MemoryProviderBase(ABC):
         return "please implement query method"
     
     @abstractmethod
-    def init_memory(self, device_id, llm):
+    def init_memory(self, device_id, role_id, llm):
         self.device_id = device_id    
+        self.role_id = role_id
         self.llm = llm
 
     @abstractmethod
