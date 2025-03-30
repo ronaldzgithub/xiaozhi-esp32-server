@@ -15,14 +15,14 @@ from core.utils.dialogue import Message, Dialogue
 from core.handle.textHandle import handleTextMessage
 from core.utils.util import get_string_no_punctuation_or_emoji, extract_json_from_string, get_ip_info
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from core.handle.sendAudioHandle import sendAudioMessage
+from core.handle.sendAudioHandle import sendAudioMessage,send_stt_message
 from core.handle.receiveAudioHandle import handleAudioMessage
 from core.handle.functionHandler import FunctionHandler
 from plugins_func.register import Action, ActionResponse
 from config.private_config import PrivateConfig
 from core.auth import AuthMiddleware, AuthenticationError
 from core.utils.auth_code_gen import AuthCodeGenerator
-#from core.mcp.manager import MCPManager
+from core.mcp.manager import MCPManager
 
 TAG = __name__
 
@@ -139,7 +139,7 @@ class ConnectionHandler:
         if self.config["selected_module"]["Intent"] == 'function_call':
             self.use_function_call_mode = True
         
-        #self.mcp_manager = MCPManager(self)
+        self.mcp_manager = MCPManager(self)
 
         # 添加角色管理
         try:
@@ -265,12 +265,15 @@ class ConnectionHandler:
 
     def _initialize_components(self):
         """加载提示词"""
-        self.prompt = self.config["prompt"]
+        roles = self.config.get("roles", [])
+                
+        self.prompt = roles[0]["prompt"]
+        self.memory.set_r = roles[0]["name"]
+
         if self.private_config:
             # 检查是否有保存的角色设置
             current_role = self.private_config.private_config.get("current_role")
             if current_role:
-                roles = self.config.get("roles", [])
                 for role in roles:
                     if role["name"] == current_role:
                         self.prompt = role["prompt"]
@@ -591,6 +594,7 @@ class ConnectionHandler:
                 }
 
                 # 处理MCP工具调用
+                self.logger.bind(tag=TAG).info(f"Processing MCP tool call for {function_name} with arguments: {function_arguments}")
                 if self.mcp_manager.is_mcp_tool(function_name):
                     result = self._handle_mcp_tool_call(function_call_data)
                 else:
@@ -852,11 +856,10 @@ class ConnectionHandler:
             # 发送音频响应
             await self.send_audio_response(tts_file)
 
-
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}，重试中")
             try:
-                future = self.executor.submit(self.speak_and_play, text, 0)
+                future = self.executor.submit(self.speak_and_play, text)
                 self.tts_queue.put(future)
             except Exception as e:                   
                 self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
@@ -870,18 +873,22 @@ class ConnectionHandler:
         if not self.proactive:
             return
             
+        
         current_time = time.time()
-        if await self.proactive.should_initiate_dialogue(current_time):
+        if await self.proactive.should_initiate_dialogue(current_time, self):
             # 生成主动对话内容
             content = await self.proactive.generate_proactive_content(
                 self.dialogue.dialogue,
                 self.proactive.user_interests
             )
-            
+            self.llm_finish_task = True
             # 添加到对话历史并开始对话
+            await send_stt_message(self, content)
             self.dialogue.put(Message(role="assistant", content=content))
-            future = self.executor.submit(self.speak_and_play, content, 0)
+            future = self.executor.submit(self.speak_and_play, content,-1)
             self.tts_queue.put(future)
+            self.asr_server_receive = True
+
             self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
             
             # 更新最后主动对话时间
@@ -889,13 +896,15 @@ class ConnectionHandler:
 
     async def start_proactive_check(self):
         """启动主动对话检查任务"""
+
+        silence_threshold = self.config.get("Proactive", {}).get("lightweight", {}).get("silence_threshold", 60)
         while not self.stop_event.is_set():
             try:
                 await self.check_proactive_dialogue()
-                await asyncio.sleep(self.config.get("silence_threshold", 60))  # 根据配置的时间间隔检查
+                await asyncio.sleep(silence_threshold)  # 根据配置的时间间隔检查
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"主动对话检查任务出错: {e}")
-                await asyncio.sleep(self.config.get("silence_threshold", 60))  # 出错后等待配置的时间间隔再试
+                await asyncio.sleep(silence_threshold)  # 出错后等待配置的时间间隔再试
 
     async def handle_audio_message(self, audio, text, speaker_id)->bool:
         """
@@ -903,12 +912,14 @@ class ConnectionHandler:
         """
         """处理音频消息"""
         try:
+            """
             # 检查是否是新用户
             if speaker_id not in self.memory.user_memories:
                 response = "你好呀， 能介绍下你自己吗"#，年龄，职业，兴趣这些"
                 await self.send_text_response(response)
                 return False
-
+            """
+            
             # 处理管理员声纹设置和验证
             if self.private_config:
                 if not self.private_config.is_admin_voiceprint_set():
@@ -985,7 +996,8 @@ class ConnectionHandler:
                     await self.send_text_response("抱歉，只有管理员才能创建角色。")
                     return False    
                 
-            return await self.handle_normal_chat(text)
+            #return await self.handle_normal_chat(text)
+            return True
 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理文本消息失败: {e}")

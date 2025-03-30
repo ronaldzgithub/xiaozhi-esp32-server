@@ -160,10 +160,10 @@ class MemoryProvider(MemoryProviderBase):
                                     self.short_memory = roles[0][1].get('short_memory', [])
                                     self.user_memories = roles[0][1].get('user_memories', {})  # 加载用户记忆
                                     logger.bind(tag=TAG).info(f"Loaded memory for device_id: {last_device_id}, role_id: {last_role_id}")
-                                    return last_device_id, last_role_id
+                                    return last_role_id
         except Exception as e:
             logger.bind(tag=TAG).error(f"加载上次device_id和role_id失败: {e}")
-        return None, None
+        return None
 
     async def add_memory(self, messages, metadata, speaker_id=None):
         """添加记忆"""
@@ -253,7 +253,9 @@ class MemoryProvider(MemoryProviderBase):
     def get_all_speakers(self):
         """获取所有说话人ID"""
         return list(self.user_memories.keys())
+    
 
+    
     def init_memory(self, device_id, llm):
         """初始化记忆系统
         Args:

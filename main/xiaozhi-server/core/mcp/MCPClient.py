@@ -3,7 +3,7 @@ from typing import Optional
 from contextlib import AsyncExitStack
 import os, shutil
 from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import stdio_client
 
 from config.logger import setup_logging
 

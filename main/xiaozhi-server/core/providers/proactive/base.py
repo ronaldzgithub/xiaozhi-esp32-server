@@ -16,7 +16,7 @@ class ProactiveDialogueManagerBase(ABC):
         self.proactive_cooldown = config.get("proactive_cooldown", 600)  # 主动对话冷却时间(秒)
 
     @abstractmethod
-    async def should_initiate_dialogue(self, current_time):
+    async def should_initiate_dialogue(self, current_time, conn):
         """判断是否应该发起主动对话"""
         pass
 

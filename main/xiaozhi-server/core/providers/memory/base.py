@@ -42,6 +42,10 @@ class MemoryProviderBase(ABC):
         """清除记忆"""
         pass
 
+    def set_role_id(self, role_id):
+        """设置当前角色ID"""
+        self.role_id = role_id
+
     def get_speaker_memory(self, speaker_id)->list:
         """获取特定说话人的记忆"""
         if speaker_id not in self.speaker_memories:

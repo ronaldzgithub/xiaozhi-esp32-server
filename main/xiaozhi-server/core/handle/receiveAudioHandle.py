@@ -39,20 +39,16 @@ async def handleAudioMessage(conn, audio):
         if len(conn.asr_audio) < 10:
             conn.asr_server_receive = True
         else:
-            try:
-                # 识别说话人
-                speaker_id = None
-                emotion = None               
+            # 识别说话人
+            speaker_id = None
+            emotion = None               
 
-                # 语音识别
-                text, file_path = await conn.asr.speech_to_text(conn.asr_audio, conn.session_id)
-                logger.bind(tag=TAG).info(f"识别文本: {text}")
-                text_len, _ = remove_punctuation_and_length(text)
-                if text_len < 0:
-                    logger.bind(tag=TAG).info(f"语音识别失败")
-                    conn.asr_server_receive = True
-                    raise Exception("语音识别失败")
-                
+            # 语音识别
+            text, file_path = await conn.asr.speech_to_text(conn.asr_audio, conn.session_id)
+            logger.bind(tag=TAG).info(f"识别文本: {text}")
+            text_len, _ = remove_punctuation_and_length(text)
+            if text_len >0:
+                    
                 if conn.voiceprint:
                     speaker_id = await conn.voiceprint.identify_speaker(conn.asr_audio)
                     logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
@@ -65,8 +61,6 @@ async def handleAudioMessage(conn, audio):
                     logger.bind(tag=TAG).info(f"识别到情感: {emotion}")"""
 
                 await conn.handle_audio_message(conn.asr_audio,text,speaker_id)
-                
-
                 # 记忆系统处理
                 if conn.memory:
                     # 添加当前对话到记忆，包含说话人信息
@@ -77,13 +71,11 @@ async def handleAudioMessage(conn, audio):
                     )
                 logger.bind(tag=TAG).info(f"生成回复{text}")
                 await startToChat(conn, text, emotion, speaker_id)
-
-            except Exception as e:
-                logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
+            else:
                 conn.asr_server_receive = True
-            finally:
-                conn.asr_audio.clear()
-                conn.reset_vad_states()
+   
+        conn.asr_audio.clear()
+        conn.reset_vad_states()
 
 
 async def startToChat(conn, text, emotion=None, speaker_id=None):

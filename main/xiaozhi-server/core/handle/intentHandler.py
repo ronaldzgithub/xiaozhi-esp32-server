@@ -73,7 +73,8 @@ async def handle_role_switch(conn, text):
     #await conn.send_text_response(response)
     future = conn.executor.submit(conn.speak_and_play, response, 0)
     conn.tts_queue.put(future)
-
+    await send_stt_message(conn, "listen")
+    
     return True
 
 

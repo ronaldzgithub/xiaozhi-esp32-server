@@ -15,7 +15,7 @@ class ProactiveDialogueManager(ProactiveDialogueManagerBase):
         })
         self.recent_memory_window = config.get("recent_memory_window", 5)  # 最近记忆窗口大小
 
-    async def should_initiate_dialogue(self, current_time):
+    async def should_initiate_dialogue(self, current_time, conn):
         """判断是否应该发起主动对话"""
         # 检查是否满足最小交互次数
         if self.interaction_count < self.min_interaction_count:
@@ -28,6 +28,11 @@ class ProactiveDialogueManager(ProactiveDialogueManagerBase):
             
         # 检查冷却时间
         if current_time - self.last_proactive_time < self.proactive_cooldown:
+            return False
+
+        # 检查系统是否正在说话
+        if not conn.asr_server_receive:
+            conn.logger.bind(tag=TAG).debug("系统正在说话，跳过主动对话检查")
             return False
             
         return True
