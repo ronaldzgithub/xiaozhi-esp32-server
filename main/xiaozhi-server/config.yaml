@@ -570,7 +570,7 @@ module_test:
 
 # 角色配置
 roles:
-  - name: "默认角色"
+  - name: "女友"
     description: "一个友善的AI助手"
     prompt: "你是一个友善的AI助手，用简单易懂的语言回答问题。"
   - name: "英语老师"

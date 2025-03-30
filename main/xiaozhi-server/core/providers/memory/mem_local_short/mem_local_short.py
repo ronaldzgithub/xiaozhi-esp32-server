@@ -211,8 +211,17 @@ class MemoryProvider(MemoryProviderBase):
                 # 获取特定说话人的记忆
                 if speaker_id in self.user_memories:
                     memories = self.user_memories[speaker_id].get("memories", [])
+                    for memory in memories:
+                        if 'metadata' in memory:
+                            del memory['metadata']
+
                     short_memory = self.user_memories[speaker_id].get("short_memory", [])
-                    return ''.join([str(item) for item in memories]) + '\n' + f'{speaker_id}的身份如下：' + ''.join([str(item) for item in short_memory])
+
+                    mem = '这是我和你的通话记录：'+''.join([str(item) for item in memories]) + '\n'
+                    if short_memory:
+                        mem += '我的一些信息，以及我的一些记忆：'+''.join([str(item) for item in short_memory])
+                    return mem
+                
                 return ""
             else:
                 # 获取全局记忆

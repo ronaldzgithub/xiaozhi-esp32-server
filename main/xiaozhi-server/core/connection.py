@@ -483,13 +483,19 @@ class ConnectionHandler:
             # 使用带记忆的对话
             future = asyncio.run_coroutine_threadsafe(self.memory.query_memory(query), self.loop)
             memory_str = future.result()
+
+            if speaker_id is None and self.memory.user_memories:
+                # 如果speaker_id为空，则选择最近的speaker_id
+                most_recent_speaker_id = max(self.memory.user_memories, key=lambda x: self.memory.user_memories[x]['last_seen'])
+                speaker_id = most_recent_speaker_id
+
             # 使用带记忆的对话
             future = asyncio.run_coroutine_threadsafe(self.memory.get_memory(speaker_id), self.loop)
             speaker_memory = future.result()
         
             memory_str+=(speaker_memory)
             if speaker_id is not None:
-                memory_str += f"\当前说话人的音色id： {speaker_id}"
+                memory_str += f"你正在和{speaker_id}说话，上面是和他的对话记录和身份信息"
             
             llm_responses = self.llm.response_with_functions(
                 self.session_id,
