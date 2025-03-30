@@ -933,7 +933,7 @@ class ConnectionHandler:
                 return False
             """
             
-            # 处理管理员声纹设置和验证
+            """# 处理管理员声纹设置和验证
             if self.private_config:
                 if not self.private_config.is_admin_voiceprint_set():
                     # 如果是第一次连接，请求设置管理员声纹
@@ -956,7 +956,7 @@ class ConnectionHandler:
                         self.private_config.enter_admin_mode()
                         self.logger.bind(tag=TAG).info("进入管理员模式")
                         
-            self.logger.bind(tag=TAG).info(f"管理员声纹设置和验证")
+            self.logger.bind(tag=TAG).info(f"管理员声纹设置和验证")"""
 
             return await self.handle_text_message(text)
 

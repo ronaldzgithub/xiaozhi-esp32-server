@@ -52,7 +52,6 @@ async def handleAudioMessage(conn, audio):
                 if conn.voiceprint:
                     speaker_id = await conn.voiceprint.identify_speaker(conn.asr_audio)
                     logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
-                logger.bind(tag=TAG).info(f"识别说话人")
 
                 """# 情感识别
                 emotion = None

@@ -94,6 +94,8 @@ selected_module:
   Intent: function_call
   # 情感识别模块，默认使用轻量级实现
   Emotion: lightweight
+  # 声纹识别模块，默认使用轻量级实现
+  Voiceprint: resemblyzer
 
 # 意图识别，是用于理解用户意图的模块，例如：播放音乐
 Intent:
@@ -643,6 +645,13 @@ Voiceprint:
     enabled: true
     provider: lightweight
     feature_dim: 128
-    feature_threshold: 0.7
+    feature_threshold: 0.85
     storage_dir: data/voiceprints
     cache_duration: 3600  # 声纹特征缓存时间(秒)
+  resemblyzer:
+    enabled: true
+    provider: resemblyzer
+    feature_dim: 128
+    feature_threshold: 0.85
+    storage_dir: data/voiceprints
+    cache_duration: 3600  # 声纹特征缓存时间(秒)  

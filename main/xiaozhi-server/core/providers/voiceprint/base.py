@@ -14,16 +14,6 @@ class VoiceprintProviderBase(ABC):
         self.feature_threshold = config.get("feature_threshold", 0.8)  # 特征匹配阈值
 
     @abstractmethod
-    async def extract_voiceprint(self, audio_data):
-        """提取声纹特征"""
-        pass
-
-    @abstractmethod
-    async def compare_voiceprints(self, voiceprint1, voiceprint2):
-        """比较两个声纹特征的相似度"""
-        pass
-
-    @abstractmethod
     async def identify_speaker(self, audio_data):
         """识别说话人"""
         pass
