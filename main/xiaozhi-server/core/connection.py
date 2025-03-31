@@ -494,8 +494,8 @@ class ConnectionHandler:
             speaker_memory = future.result()
         
             memory_str+=(speaker_memory)
-            if speaker_id is not None:
-                memory_str += f"你正在和{speaker_id}说话，上面是和他的对话记录和身份信息"
+            """if speaker_id is not None:
+                memory_str += f"你正在和这个人说话，上面是和他的对话记录和身份信息"""
             
             llm_responses = self.llm.response_with_functions(
                 self.session_id,
