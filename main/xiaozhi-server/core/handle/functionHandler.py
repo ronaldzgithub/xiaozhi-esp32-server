@@ -87,7 +87,7 @@ class FunctionHandler:
                 funcItem.type == ToolType.SYSTEM_CTL
                 or funcItem.type == ToolType.IOT_CTL
             ):
-                return func(conn, **arguments)
+                return func(self.conn, **arguments)
             elif funcItem.type == ToolType.WAIT:
                 return func(**arguments)
             elif funcItem.type == ToolType.CHANGE_SYS_PROMPT:
