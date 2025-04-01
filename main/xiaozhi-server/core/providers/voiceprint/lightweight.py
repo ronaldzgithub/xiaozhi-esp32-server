@@ -20,9 +20,57 @@ TAG = __name__
 class VoiceprintProvider(VoiceprintProviderBase):
     def __init__(self, config):
         super().__init__(config)
+        model_dir = config.get("model_dir", "pretrained_models/spkrec-ecapa-voxceleb")
+        os.makedirs(model_dir, exist_ok=True)
+        
+        # 如果模型目录为空，则下载模型
+        if not os.path.exists(os.path.join(model_dir, "embedding_model.ckpt")):
+            logger.bind(tag=TAG).info("开始下载声纹识别模型...")
+            # 强制下载完整模型到本地
+            import huggingface_hub
+            huggingface_hub.hf_hub_download(
+                repo_id="speechbrain/spkrec-ecapa-voxceleb",
+                filename="embedding_model.ckpt",
+                local_dir=model_dir
+            )
+            huggingface_hub.hf_hub_download(
+                repo_id="speechbrain/spkrec-ecapa-voxceleb",
+                filename="hyperparams.yaml",
+                local_dir=model_dir
+            )
+            huggingface_hub.hf_hub_download(
+                repo_id="speechbrain/spkrec-ecapa-voxceleb",
+                filename="mean_var_norm_emb.ckpt",
+                local_dir=model_dir
+            )
+            huggingface_hub.hf_hub_download(
+                repo_id="speechbrain/spkrec-ecapa-voxceleb",
+                filename="classifier.ckpt",
+                local_dir=model_dir
+            )
+            huggingface_hub.hf_hub_download(
+                repo_id="speechbrain/spkrec-ecapa-voxceleb",
+                filename="label_encoder.txt",
+                local_dir=model_dir
+            )
+            logger.bind(tag=TAG).info("模型下载完成")
+
+            # 修改 hyperparams.yaml 中的路径
+            yaml_file = os.path.join(model_dir, "hyperparams.yaml")
+            if os.path.exists(yaml_file):
+                with open(yaml_file, 'r') as f:
+                    yaml_content = f.read()
+                yaml_content = yaml_content.replace(
+                    "pretrained_path: speechbrain/spkrec-ecapa-voxceleb",
+                    f"pretrained_path: {model_dir}"
+                )
+                with open(yaml_file, 'w') as f:
+                    f.write(yaml_content)
+        
+        # 加载本地模型
         self.model = SpeakerRecognition.from_hparams(
-            source="speechbrain/spkrec-ecapa-voxceleb",
-            savedir="pretrained_models/spkrec-ecapa-voxceleb"
+            source=model_dir,
+            savedir=model_dir
         )
         self.sample_rate = config.get("sample_rate", 16000)
         self.feature_threshold = config.get("feature_threshold", 0.85)
