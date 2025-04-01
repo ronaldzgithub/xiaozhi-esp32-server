@@ -43,6 +43,9 @@ class TTSProviderBase(ABC):
     async def text_to_speak(self, text, output_file):
         pass
 
+    def set_voice(self, voice):
+        self.voice = voice
+
     def audio_to_opus_data(self, audio_file_path):
         """音频文件转换为Opus编码"""
         # 获取文件后缀名

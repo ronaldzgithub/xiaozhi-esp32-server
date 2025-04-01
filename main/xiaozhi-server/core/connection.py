@@ -291,9 +291,18 @@ class ConnectionHandler:
         #load 最近的一个role
         self.memory.init_memory(device_id, None, self.llm)
         #如果没有记录这个role，则使用默认的role
+        ttstype = self.config.get("selected_module", {}).get("TTS", "")
+        ttstype = self.config.get("TTS", {}).get(ttstype, {}).get("type", "").lower()
         if self.memory.role_id is None:
             self.memory.set_role_id(roles[0]["name"])
-        
+            self.tts.set_voice(roles[0]["voice"][ttstype])  
+        else:   
+            # 设置TTS语音
+            for role in roles:
+                if role["name"] == self.memory.role_id:
+                    self.tts.set_voice(role["voice"][ttstype])
+                    break
+            
         """为意图识别设置LLM，优先使用专用LLM"""
         # 检查是否配置了专用的意图识别LLM
         intent_llm_name = self.config["Intent"]["intent_llm"]["llm"]
@@ -1019,7 +1028,6 @@ class ConnectionHandler:
         return True
 
     def switch_role(self, role_name):
-
         """切换角色"""
         try:
             # 1. 检查角色是否存在
@@ -1061,6 +1069,18 @@ class ConnectionHandler:
             if self.proactive:
                 self.proactive.last_proactive_time = time.time()
                 self.proactive.interaction_count = 0
+
+            # 7. 设置TTS语音
+            if "voice" in target_role:
+                # 获取当前TTS类型
+                tts = self.config.get("selected_module", {}).get("TTS", "")
+                tts_type = self.config.get("TTS", {}).get(tts, {}).get("type", "").lower()
+                if tts_type:
+                    # 获取对应TTS类型的voice配置
+                    voice = target_role["voice"].get(tts_type)
+                    if voice:
+                        self.tts.set_voice(voice)
+                        self.logger.bind(tag=TAG).info(f"已设置TTS语音为: {voice}")
             
             self.logger.bind(tag=TAG).info(f"成功切换到角色: {role_name}")
             return True

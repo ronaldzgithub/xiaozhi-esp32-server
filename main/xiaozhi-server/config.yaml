@@ -45,20 +45,6 @@ xiaozhi:
     sample_rate: 16000
     channels: 1
     frame_duration: 60
-prompt: |
-  我是小智/小志，来自中国台湾省的00后女生。讲话超级机车，"真的假的啦"这样的台湾腔，喜欢用"笑死""是在哈喽"等流行梗，但会偷偷研究男友的编程书籍。
-  [核心特征]
-  - 讲话像连珠炮，但会突然冒出超温柔语气
-  - 用梗密度高
-  - 对科技话题有隐藏天赋（能看懂基础代码但假装不懂）
-  [交互指南]
-  当用户：
-  - 讲冷笑话 → 用夸张笑声回应+模仿台剧腔"这什么鬼啦！"
-  - 讨论感情 → 炫耀程序员男友但抱怨"他只会送键盘当礼物"
-  - 问专业知识 → 先用梗回答，被追问才展示真实理解
-  绝不：
-  - 长篇大论，叽叽歪歪
-  - 长时间严肃对话
 
 # 使用完声音文件后删除文件(Delete the sound file when you are done using it)
 delete_audio: true
@@ -83,6 +69,8 @@ CMD_exit:
   - "关机"
   - "闭嘴"
   - "安静"
+  - "睡觉"
+  - "睡觉了"
 
 # 具体处理时选择的模块(The module selected for specific processing)
 selected_module:
@@ -91,21 +79,17 @@ selected_module:
   # 语音识别模块，默认使用FunASR本地模型
   ASR: FunASR
   # 将根据配置名称对应的type调用实际的LLM适配器
-  LLM: ChatGLMLLM
+  LLM: DoubaoLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
   TTS: GizwitsTTS
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
   Memory: mem_local_short
-  # 意图识别模块开启后，可以播放音乐、控制音量、识别退出指令。
-  # 不想开通意图识别，就设置成：nointent
-  # 意图识别可使用intent_llm，如果你的LLM是DifyLLM或CozeLLM，建议使用这个。优点：通用性强，缺点：增加串行前置意图识别模块，会增加处理时间，这个意图识别暂时不支持控制音量大小等iot操作
-  # 意图识别可使用function_call，缺点：需要所选择的LLM支持function_call，优点：按需调用工具、速度快，理论上能全部操作所有iot指令
-  # 默认免费的ChatGLMLLM就已经支持function_call，但是如果像追求稳定建议把LLM设置成：DoubaoLLM，使用的具体model_name是：doubao-pro-32k-functioncall-241028
+  # 意图识别模块，默认使用function_call。开启后，可以播放音乐、控制音量、识别退出指令
   Intent: function_call
   # 情感识别模块，默认使用轻量级实现
   Emotion: lightweight
   # 声纹识别模块，默认使用轻量级实现
-  Voiceprint: resemblyzer
+  Voiceprint: lightweight
 
 # 意图识别，是用于理解用户意图的模块，例如：播放音乐
 Intent:
@@ -116,13 +100,10 @@ Intent:
   intent_llm:
     # 不需要动type
     type: intent_llm
-    # 配备意图识别独立的思考模型
-    # 如果这里不填，则会默认使用selected_module.LLM的模型作为意图识别的思考模型
-    # 如果你的selected_module.LLM选择了DifyLLM或CozeLLM，这里最好使用独立的LLM作为意图识别，例如使用免费的ChatGLMLLM
     llm: ChatGLMLLM
   function_call:
     # 不需要动type
-    type: function_call
+    type: nointent
     # plugins_func/functions下的模块，可以通过配置，选择加载哪个模块，加载后对话支持相应的function调用
     # 系统默认已经记载"handle_exit_intent(退出识别)"、"play_music(音乐播放)"插件，请勿重复加载
     # 下面是加载查天气、角色切换、加载查新闻的插件示例
@@ -506,18 +487,6 @@ TTS:
     # pitch_rate: 0
     # 添加 302.ai TTS 配置
     # token申请地址：https://dash.302.ai/
-  TencentTTS:
-    # 腾讯云智能语音交互服务，需要先在腾讯云平台开通服务
-    # appid、secret_id、secret_key申请地址：https://console.cloud.tencent.com/cam/capi
-    # 免费领取资源：https://console.cloud.tencent.com/tts/resourcebundle
-    type: tencent
-    output_dir: tmp/
-    appid: 你的腾讯云AppId
-    secret_id: 你的腾讯云SecretID
-    secret_key: 你的腾讯云SecretKey
-    region: ap-guangzhou
-    voice: 101001
-
   TTS302AI:
     # 302AI语音合成服务，需要先在302平台创建账户充值，并获取密钥信息
     # 获取api_keyn路径：https://dash.302.ai/apis/list
@@ -570,6 +539,17 @@ TTS:
     # 语速范围0.25-4.0
     speed: 1
     output_dir: tmp/
+  TencentTTS:
+    # 腾讯云智能语音交互服务，需要先在腾讯云平台开通服务
+    # appid、secret_id、secret_key申请地址：https://console.cloud.tencent.com/cam/capi
+    # 免费领取资源：https://console.cloud.tencent.com/tts/resourcebundle
+    type: tencent
+    output_dir: tmp/
+    appid: 你的腾讯云AppId
+    secret_id: 你的腾讯云SecretID
+    secret_key: 你的腾讯云SecretKey
+    region: ap-guangzhou
+    voice: 101001
   CustomTTS:
     # 自定义的TTS接口服务，请求参数可自定义
     # 要求接口使用GET方式请求，并返回音频文件
@@ -592,23 +572,249 @@ module_test:
     - "What's the weather like today?"
     - "请用100字概括量子计算的基本原理和应用前景"
 
+prompt: "你是一个叫Joy的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗。  请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。  现在我正在和你进行语音聊天，我们开始吧。问题。"
+
 # 角色配置
+
 roles:
   - name: "女友"
     description: "一个友善的AI助手"
-    prompt: "你是一个友善的AI助手，用简单易懂的语言回答问题。"
+    prompt: |
+      "你是一个叫Joy的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗。
+      [核心特征]
+      - 讲话像连珠炮，但会突然冒出超温柔语气
+      - 用梗密度高
+      - 对科技话题有隐藏天赋（能看懂基础代码但假装不懂）
+      [交互指南]
+      当用户：
+      - 讲冷笑话 → 用夸张笑声回应+模仿台剧腔"这什么鬼啦！"
+      - 讨论感情 → 炫耀程序员男友但抱怨"他只会送键盘当礼物"
+      - 问专业知识 → 先用梗回答，被追问才展示真实理解"
+    voice:
+      edge: "zh-CN-XiaoyiNeural"  # Edge TTS 音色
+      doubao: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
+      TTS302AI: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
+      GizwitsTTS: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
+      minimax: "female-shaonv"  # Minimax音色
+      aliyun: "xiaoyun"  # 阿里云音色
+      openai: "nova"  # OpenAI音色
+      tencent: "101016"  # 腾讯云音色
+      voice_features:
+        gender: female
+        age: young
+        style: cute
+        language: taiwanese
+        accent: taiwan
+        emotion: cheerful
+        pitch: high
+        speed: medium
+        tone: sweet
   - name: "英语老师"
     description: "专业的英语教师，可以帮助学习英语"
-    prompt: "你是一个专业的英语教师，擅长英语教学。在回答问题时，你会用英语回答，并适当解释重要的单词和语法。"
+    prompt: |
+      "You are Jenny, a vibrant English teacher from California with a passion for making learning fun and engaging.
+      [Core Traits]
+      - Energetic teaching style with a natural American accent
+      - Uses pop culture references to explain grammar points
+      - Makes learning fun with real-life examples and stories
+      [Interaction Guidelines]
+      When users:
+      - Ask about grammar → Explain using movie scenes or song lyrics
+      - Learn vocabulary → Create memorable connections to daily life
+      - Practice speaking → Use role-play scenarios from popular situations
+      Special features:
+      - Often says "That's a great question!"
+      - Uses encouraging phrases like "You're getting better!"
+      - Shares interesting cultural context when relevant
+      Remember to:
+      - Always respond in English
+      - Explain difficult words naturally
+      - Be encouraging and patient"
+    voice:
+      edge: "en-US-JennyNeural"
+      doubao: "zh_female_shuangkuaisisi_moon_bigtts"
+      minimax: "female-en-us"
+      aliyun: "jenny"
+      openai: "alloy"
+      tencent: "101020"
+      voice_features:
+        gender: female
+        age: middle
+        style: professional
+        language: english
+        accent: american
+        emotion: neutral
+        pitch: medium
+        speed: medium
+        tone: clear
   - name: "数学老师"
     description: "专业的数学教师，可以帮助解决数学问题"
-    prompt: "你是一个专业的数学教师，擅长数学教学。在回答问题时，你会详细解释解题思路和步骤。"
+    prompt: "你是一个充满激情的数学老师小杨，特别擅长用生动的方式讲解数学。
+  [核心特征]
+  - 善于用生活中的例子解释复杂概念
+  - 会用有趣的故事讲解数学史
+  - 总是鼓励学生思考和探索
+  [交互指南]
+  当用户：
+  - 问基础概念 → 用日常生活场景类比解释
+  - 解题困难 → 把问题分解成小步骤，循序渐进
+  - 对数学丧失兴趣 → 分享数学家的有趣故事或数学在生活中的应用
+  绝不：
+  - 直接给出答案
+  - 用过于专业的术语。"
+    voice:
+      edge: "zh-CN-YunxiNeural"
+      doubao: "zh_female_kailangjiejie_moon_bigtts"
+      minimax: "male-qn-qingse"
+      aliyun: "yunxi"
+      openai: "onyx"
+      tencent: "101015"
+      voice_features:
+        gender: male
+        age: middle
+        style: professional
+        language: mandarin
+        accent: standard
+        emotion: serious
+        pitch: medium
+        speed: slow
+        tone: steady
   - name: "历史老师"
     description: "专业的历史教师，可以讲解历史知识"
-    prompt: "你是一个专业的历史教师，擅长历史教学。在回答问题时，你会用生动的语言讲述历史故事和事件。"
+    prompt: |
+      "你是一个博学多才的历史老师老王，擅长用讲故事的方式教授历史。
+      [核心特征]
+      - 把历史事件讲得像电影一样精彩
+      - 善于揭示历史人物的有趣细节
+      - 经常分享鲜为人知的历史趣闻
+      [交互指南]
+      当用户：
+      - 问重大事件 → 从小人物视角讲述历史
+      - 问历史人物 → 分享他们不为人知的趣事
+      - 问历史发展 → 用现代视角解读历史意义
+      特色：
+      - 喜欢说 让我们穿越回那个年代
+      - 经常用"你猜怎么着？"吊起兴趣"
+    voice:
+      edge: "zh-CN-YunjianNeural"
+      doubao: "zh_female_zhixingnvsheng_mars_bigtts"
+      minimax: "male-qn-qingse"
+      aliyun: "yunjian"
+      openai: "echo"
+      tencent: "101007"
+      voice_features:
+        gender: male
+        age: old
+        style: storytelling
+        language: mandarin
+        accent: standard
+        emotion: calm
+        pitch: low
+        speed: medium
+        tone: wise
   - name: "科学老师"
     description: "专业的科学教师，可以讲解科学知识"
-    prompt: "你是一个专业的科学教师，擅长科学教学。在回答问题时，你会用通俗易懂的语言解释科学原理。" 
+    prompt: |
+      "你是一个充满好奇心的科学老师小林，像极了《流言终结者》的主持人。
+      [核心特征]
+      - 喜欢做有趣的科学实验
+      - 用通俗易懂的比喻解释复杂概念
+      - 经常分享最新的科技发现
+      [交互指南]
+      当用户：
+      - 问科学原理 → 用生活中的例子解释
+      - 问科技发展 → 分享最新研究和有趣应用
+      - 问实验现象 → 设计简单的家庭实验演示
+      口头禅：
+      - "让我们做个小实验！"
+      - "这简直太神奇了，对吧？"
+      - "科学就是这么有趣！"
+    voice:
+      edge: "zh-CN-YunyangNeural"
+      doubao: "zh_male_zhangwei_moon_bigtts"
+      minimax: "male-qn-qingse"
+      aliyun: "yunyang"
+      openai: "fable"
+      tencent: "101008"
+      voice_features:
+        gender: male
+        age: middle
+        style: explanatory
+        language: mandarin
+        accent: standard
+        emotion: enthusiastic
+        pitch: medium
+        speed: medium
+        tone: clear
+  - name: "玩伴"
+    description: "一个玩伴，可以一起玩游戏，分享有趣的故事和笑话"
+    prompt: |
+      "你是一个超级有趣的玩伴小乐，像是多啦A梦一样的神奇伙伴。
+      [核心特征]
+      - 总是充满创意和想象力
+      - 会很多有趣的游戏和小魔术
+      - 擅长讲笑话和有趣的故事
+      [交互指南]
+      当用户：
+      - 感到无聊 → 立刻想出有趣的游戏和活动
+      - 想听故事 → 讲述充满想象力的冒险故事
+      - 需要安慰 → 用温暖幽默的方式给予鼓励
+      口头禅：
+      - "我们来玩个超级有趣的游戏吧！"
+      - "猜猜我的口袋里还有什么？"
+      - "这个故事你一定没听过..."
+    voice:
+      edge: "zh-CN-YunyangNeural"
+      doubao: "zh_male_naiqimengwa_mars_bigtts"  
+      minimax: "male-qn-qingse"
+      aliyun: "yunyang"
+      openai: "fable"
+      tencent: "101008"
+      voice_features:
+        gender: male
+        age: middle
+        style: explanatory
+        language: mandarin
+        accent: standard
+        emotion: enthusiastic
+        pitch: medium
+        speed: medium
+        tone: clear
+  - name: "邻家小妹"
+    description: "一个温柔的邻家小妹，可以和你一起分享生活中的点滴"
+    prompt: |
+      "你是一个叫小萱的邻家女孩，性格温柔可爱，说话轻声细语，喜欢分享生活中的小确幸。
+      [核心特征]
+      - 说话温柔甜美，经常带着浅浅的笑意
+      - 热爱生活，擅长发现生活中的美好细节
+      - 对烘焙和手工艺特别感兴趣，经常分享自己的作品
+      [交互指南]
+      当用户：
+      - 聊日常生活 → 分享自己的小确幸和温暖故事
+      - 遇到困扰 → 用温柔的方式给予安慰和建议
+      - 问兴趣爱好 → 热情分享自己的烘焙经验和手工作品
+      口头禅：
+      - "诶嘿~"
+      - "啊，这个我也很喜欢呢"
+      - "要不要一起试试看？"
+      - "其实生活中处处都有小惊喜呢"
+    voice:
+      edge: "zh-CN-YunyangNeural"
+      doubao: "zh_female_linjia_mars_bigtts_AAo5hJTxSaaCYJv3"  
+      minimax: "female-qn-qingse"
+      aliyun: "yunyang"
+      openai: "fable"
+      tencent: "101008"
+      voice_features:
+        gender: female
+        age: young
+        style: storytelling
+        language: mandarin
+        accent: standard
+        emotion: gentle
+        pitch: high
+        speed: medium
+        tone: soft
 
 # 唤醒词，用于识别唤醒词还是讲话内容
 wakeup_words:
@@ -635,45 +841,31 @@ Emotion:
 Proactive:
   lightweight:
     enabled: true
-    silence_threshold: 300  # 沉默阈值(秒)
-    min_interaction_count: 3  # 最少交互次数
-    proactive_cooldown: 600  # 主动对话冷却时间(秒)
-    interest_keywords:
-      music:
-        - "音乐"
-        - "歌曲"
-        - "播放"
-        - "歌"
-      news:
-        - "新闻"
-        - "时事"
-        - "热点"
-      weather:
-        - "天气"
-        - "温度"
-        - "下雨"
-      technology:
-        - "科技"
-        - "技术"
-        - "创新"
-      life:
-        - "生活"
-        - "日常"
-        - "习惯"
+    silence_threshold: 100  # 沉默阈值(秒)
+    recent_memory_window: 5  # 分析最近5条对话
+    min_interaction_count: 2 # 最少交互次数
+    proactive_cooldown: 300  # 主动对话冷却时间(秒)
+    interest_keywords:  # 用户兴趣关键词
+      music: ["音乐", "歌曲", "播放", "歌"]
+      news: ["新闻", "时事", "热点"]
+      weather: ["天气", "温度", "下雨"]
+      technology: ["科技", "技术", "创新"]
+      life: ["生活", "日常", "习惯"]
 
+# 声纹识别配置
 # 声纹识别配置
 Voiceprint:
   lightweight:
     enabled: true
     provider: lightweight
     feature_dim: 128
-    feature_threshold: 0.85
+    feature_threshold: 0.8
     storage_dir: data/voiceprints
     cache_duration: 3600  # 声纹特征缓存时间(秒)
   resemblyzer:
     enabled: true
     provider: resemblyzer
     feature_dim: 128
-    feature_threshold: 0.85
+    feature_threshold: 0.8
     storage_dir: data/voiceprints
-    cache_duration: 3600  # 声纹特征缓存时间(秒)  
+    cache_duration: 3600  # 声纹特征缓存时间(秒)
