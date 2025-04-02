@@ -40,7 +40,7 @@ class ConnectionHandler:
         self.auth = AuthMiddleware(config)
         self.proactive_check_task = None  # 添加主动对话检查任务
 
-        # 添加情感识别模块
+        """# 添加情感识别模块
         emotion_cls_name = self.config["selected_module"].get("Emotion", "lightweight")
         has_emotion_cfg = self.config.get("Emotion") and emotion_cls_name in self.config["Emotion"]
         emotion_cfg = self.config["Emotion"][emotion_cls_name] if has_emotion_cfg else {}
@@ -50,7 +50,7 @@ class ConnectionHandler:
             self.emotion = EmotionProvider(emotion_cfg)
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"情感识别模块初始化失败: {e}")
-            self.emotion = None
+            self.emotion = None"""
 
         # 添加主动对话模块
         proactive_cls_name = self.config["selected_module"].get("Proactive", "lightweight")
@@ -64,7 +64,7 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"主动对话模块初始化失败: {e}")
             self.proactive = None
 
-        # 添加声纹识别模块
+        """# 添加声纹识别模块
         voiceprint_cls_name = self.config["selected_module"].get("Voiceprint", "lightweight")
         has_voiceprint_cfg = self.config.get("Voiceprint") and voiceprint_cls_name in self.config["Voiceprint"]
         voiceprint_cfg = self.config["Voiceprint"][voiceprint_cls_name] if has_voiceprint_cfg else {}
@@ -74,7 +74,7 @@ class ConnectionHandler:
             self.voiceprint = VoiceprintProvider(voiceprint_cfg)
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"声纹识别模块初始化失败: {e}")
-            self.voiceprint = None
+            self.voiceprint = None"""
 
         self.websocket = None
         self.headers = None
@@ -291,17 +291,10 @@ class ConnectionHandler:
         #load 最近的一个role
         self.memory.init_memory(device_id, None, self.llm)
         #如果没有记录这个role，则使用默认的role
-        ttstype = self.config.get("selected_module", {}).get("TTS", "")
-        ttstype = self.config.get("TTS", {}).get(ttstype, {}).get("type", "").lower()
         if self.memory.role_id is None:
             self.memory.set_role_id(roles[0]["name"])
-            self.tts.set_voice(roles[0]["voice"][ttstype])  
-        else:   
-            # 设置TTS语音
-            for role in roles:
-                if role["name"] == self.memory.role_id:
-                    self.tts.set_voice(role["voice"][ttstype])
-                    break
+
+        self.switch_role(self.memory.role_id)
             
         """为意图识别设置LLM，优先使用专用LLM"""
         # 检查是否配置了专用的意图识别LLM

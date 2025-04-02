@@ -32,11 +32,13 @@ def change_role(conn, name: str):
     """切换角色"""
     """if name not in prompts:
         return ActionResponse(action=Action.RESPONSE, result="切换角色失败", response="不支持的角色")"""
-    conn.switch_role(name)
-    
-    logger.bind(tag=TAG).info(f"准备切换角色:{name}")
-    if name == '英语老师':
-        res = f" hello, i am your english teacher"
+    if conn.switch_role(name):
+        
+        logger.bind(tag=TAG).info(f"准备切换角色:{name}")
+        if name == '英语老师':
+            res = f" hello, i am your english teacher"
+        else:
+            res = f"切换角色成功,我是{name}"
     else:
-        res = f"切换角色成功,我是{name}"
+        res = f"切换角色失败,不支持的角色,支持的角色有:{roles}"
     return ActionResponse(action=Action.RESPONSE, result="切换角色已处理", response=res)

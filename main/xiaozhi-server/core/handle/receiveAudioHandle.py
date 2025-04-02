@@ -50,11 +50,11 @@ async def handleAudioMessage(conn, audio):
             logger.bind(tag=TAG).info(f"识别文本: {text}")
             text_len, _ = remove_punctuation_and_length(text)
             if text_len >0:
-                    
-                if conn.voiceprint:
+                speaker_id = 'speaker_0'
+                """if conn.voiceprint:
                     speaker_id = await conn.voiceprint.identify_speaker(conn.asr_audio)
                     logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
-
+                """
                 """# 情感识别
                 emotion = None
                 if conn.emotion:
