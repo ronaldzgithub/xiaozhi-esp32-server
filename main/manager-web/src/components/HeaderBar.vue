@@ -10,16 +10,14 @@
       <!-- 中间导航菜单 -->
       <div class="header-center">
         <div class="equipment-management" :class="{ 'active-tab': $route.path === '/home' }" @click="goHome">
-
           <img loading="lazy" alt="" src="@/assets/header/robot.png" :style="{ filter: $route.path === '/home' ? 'brightness(0) invert(1)' : 'None' }"/>
-
           智能体管理
         </div>
-        <div class="equipment-management" :class="{ 'active-tab': $route.path === '/user-management' }" @click="goUserManagement">
+        <div v-if="isSuperAdmin" class="equipment-management" :class="{ 'active-tab': $route.path === '/user-management' }" @click="goUserManagement">
           <img loading="lazy" alt="" src="@/assets/header/user_management.png" :style="{ filter: $route.path === '/user-management' ? 'brightness(0) invert(1)' : 'None' }"/>
           用户管理
         </div>
-        <div class="equipment-management" :class="{ 'active-tab': $route.path === '/model-config' }" @click="goModelConfig">
+        <div v-if="isSuperAdmin" class="equipment-management" :class="{ 'active-tab': $route.path === '/model-config' }" @click="goModelConfig">
           <img loading="lazy" alt="" src="@/assets/header/model_config.png" :style="{ filter: $route.path === '/model-config' ? 'brightness(0) invert(1)' : 'None' }"/>
           模型配置
         </div>
@@ -59,7 +57,7 @@
 <script>
 import userApi from '@/apis/module/user';
 import ChangePasswordDialog from './ChangePasswordDialog.vue'; // 引入修改密码弹窗组件
-import { mapActions } from 'vuex'; // 导入 mapActions
+import { mapActions, mapGetters } from 'vuex';
 
 
 export default {
@@ -78,13 +76,19 @@ export default {
       isChangePasswordDialogVisible: false // 控制修改密码弹窗的显示
     }
   },
+  computed: {
+    ...mapGetters(['getIsSuperAdmin']),
+    isSuperAdmin() {
+      return this.getIsSuperAdmin;
+    }
+  },
   mounted() {
     this.fetchUserInfo()
   },
   methods: {
     goHome() {
       // 跳转到首页
-      this.$router.push('/')
+      this.$router.push('/home')
     },
     goUserManagement() {
       this.$router.push('/user-management')
@@ -96,29 +100,35 @@ export default {
     fetchUserInfo() {
       userApi.getUserInfo(({data}) => {
         this.userInfo = data.data
+        if (data.data.superAdmin !== undefined) {
+          this.$store.commit('setUserInfo', data.data);
+        }
       })
     },
 
     // 处理搜索
     handleSearch() {
       const searchValue = this.search.trim();
-      let filteredDevices;
 
+      // 如果搜索内容为空，触发重置事件
       if (!searchValue) {
-        // 当搜索内容为空时，显示原始完整列表
-        filteredDevices = this.$parent.originalDevices;
-      } else {
-        // 过滤逻辑
-        filteredDevices = this.devices.filter(device => {
-          return device.agentName.includes(searchValue) ||
-              device.ttsModelName.includes(searchValue) ||
-              device.ttsVoiceName.includes(searchValue);
-        });
+        this.$emit('search-reset');
+        return;
       }
 
-      this.$emit('search-result', filteredDevices);
+      try {
+        // 创建不区分大小写的正则表达式
+        const regex = new RegExp(searchValue, 'i');
+        // 触发搜索事件，将正则表达式传递给父组件
+        this.$emit('search', regex);
+      } catch (error) {
+        console.error('正则表达式创建失败:', error);
+        this.$message.error({
+          message: '搜索关键词格式不正确',
+          showClose: true
+        });
+      }
     },
-
     // 显示修改密码弹窗
     showChangePasswordDialog() {
       this.isChangePasswordDialogVisible = true;
@@ -128,13 +138,16 @@ export default {
       try {
         // 调用 Vuex 的 logout action
         await this.logout();
-
-        this.$message.success('退出登录成功');
-
-        this.$router.push('/login');
+        this.$message.success({
+          message:'退出登录成功',
+          showClose:true
+        });
       } catch (error) {
         console.error('退出登录失败:', error);
-        this.$message.error('退出登录失败，请重试');
+        this.$message.error({
+          message:'退出登录失败，请重试',
+          showClose:true
+        });
       }
     },
 
@@ -196,6 +209,7 @@ export default {
 }
 
 .equipment-management {
+  padding: 0 9px;
   width: 82px;
   height: 24px;
   border-radius: 12px;

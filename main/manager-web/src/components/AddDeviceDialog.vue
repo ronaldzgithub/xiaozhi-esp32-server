@@ -13,7 +13,7 @@
         <span style="font-size: 11px"> 验证码：</span>
       </div>
       <div class="input-46" style="margin-top: 12px;">
-        <el-input placeholder="请输入设备播报的6位数验证码.." v-model="deviceCode" />
+        <el-input placeholder="请输入设备播报的6位数验证码.." v-model="deviceCode" @keyup.enter.native="confirm"/>
       </div>
     </div>
     <div style="display: flex;margin: 15px 15px;gap: 7px;">
@@ -49,17 +49,23 @@ export default {
         return;
       }
       this.loading = true;
-      import('@/apis/module/user').then(({ default: userApi }) => {
-        userApi.bindDevice(
+      import('@/apis/module/device').then(({ default: deviceApi }) => {
+        deviceApi.bindDevice(
             this.agentId,
             this.deviceCode, ({data}) => {
               this.loading = false;
               if (data.code === 0) {
                 this.$emit('refresh');
-                this.$message.success('设备绑定成功');
+                    this.$message.success({
+                    message: '设备绑定成功',
+                    showClose: true
+                });
                 this.closeDialog();
               } else {
-                this.$message.error(data.msg || '绑定失败');
+                    this.$message.error({
+                    message: data.msg || '绑定失败',
+                    showClose: true
+                });
               }
             }
           );
