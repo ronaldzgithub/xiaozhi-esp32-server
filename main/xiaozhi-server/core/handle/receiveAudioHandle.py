@@ -3,6 +3,7 @@ import time
 from core.utils.util import remove_punctuation_and_length
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.intentHandler import handle_user_intent
+import asyncio
 
 from core.utils.dialogue import Message, Dialogue
 
@@ -15,6 +16,7 @@ async def handleAudioMessage(conn, audio):
     if not conn.asr_server_receive:
         logger.bind(tag=TAG).debug(f"前期数据处理中，暂停接收")
         return
+
     # 根据客户端监听模式决定是否有声音
     if conn.client_listen_mode == "auto":
         # 自动模式下，使用VAD检测是否有声音
@@ -23,58 +25,65 @@ async def handleAudioMessage(conn, audio):
         # 非自动模式下，直接使用客户端报告的有无声音信息
         have_voice = conn.client_have_voice
 
-    # 如果本次没有声音，本段也没声音，就把声音丢弃了
-    if have_voice == False and conn.client_have_voice == False:
+    # 优化无声音处理逻辑
+    if not have_voice and not conn.client_have_voice:
         await no_voice_close_connect(conn)
+        # 只保留最新的3帧音频内容，进一步减少内存使用
         conn.asr_audio.append(audio)
-        conn.asr_audio = conn.asr_audio[
-            -10:
-        ]  # 保留最新的10帧音频内容，解决ASR句首丢字问题
+        conn.asr_audio = conn.asr_audio[-3:]
         return
+
     conn.client_no_voice_last_time = 0.0
     conn.asr_audio.append(audio)
-    # 如果本段有声音，且已经停止了
+
+    # 优化语音停止处理逻辑
     if conn.client_voice_stop:
         conn.client_abort = False
         conn.asr_server_receive = False
-        # 音频太短了，无法识别
-        if len(conn.asr_audio) < 15:
+
+        # 优化音频长度判断
+        if len(conn.asr_audio) < 8:  # 进一步降低最小音频长度要求
             conn.asr_server_receive = True
         else:
-            # 识别说话人
-            speaker_id = None
-            emotion = None               
-
-            # 语音识别
-            text, file_path = await conn.asr.speech_to_text(conn.asr_audio, conn.session_id)
+            # 创建任务列表
+            tasks = []
+            
+            # 添加语音识别任务
+            asr_task = asyncio.create_task(conn.asr.speech_to_text(conn.asr_audio, conn.session_id))
+            tasks.append(asr_task)
+            
+            # 等待语音识别完成
+            text, file_path = await asr_task
             logger.bind(tag=TAG).info(f"识别文本: {text}")
+            
             text_len, _ = remove_punctuation_and_length(text)
-            if text_len >0:
+            if text_len > 0:
                 speaker_id = 'speaker_0'
-                """if conn.voiceprint:
-                    speaker_id = await conn.voiceprint.identify_speaker(conn.asr_audio)
-                    logger.bind(tag=TAG).info(f"识别到说话人: {speaker_id}")
-                """
-                """# 情感识别
-                emotion = None
-                if conn.emotion:
-                    emotion = await conn.emotion.detect_emotion(conn.asr_audio, text)
-                    logger.bind(tag=TAG).info(f"识别到情感: {emotion}")"""
-
-                await conn.handle_audio_message(conn.asr_audio,text,speaker_id)
-                # 记忆系统处理
+                
+                # 添加音频消息处理任务
+                audio_task = asyncio.create_task(conn.handle_audio_message(conn.asr_audio, text, speaker_id))
+                tasks.append(audio_task)
+                
+                # 添加记忆系统任务
                 if conn.memory:
-                    # 添加当前对话到记忆，包含说话人信息
-                    await conn.memory.add_memory(
+                    memory_task = asyncio.create_task(conn.memory.add_memory(
                         text,
                         conn.dialogue.get_metadata(),
                         speaker_id
-                    )
+                    ))
+                    tasks.append(memory_task)
+                
                 logger.bind(tag=TAG).info(f"生成回复{text}")
-                await startToChat(conn, text, emotion, speaker_id)
+                
+                # 添加对话任务
+                chat_task = asyncio.create_task(startToChat(conn, text, None, speaker_id))
+                tasks.append(chat_task)
+                
+                # 等待所有任务完成
+                await asyncio.gather(*tasks)
             else:
                 conn.asr_server_receive = True
-   
+
         conn.asr_audio.clear()
         conn.reset_vad_states()
 

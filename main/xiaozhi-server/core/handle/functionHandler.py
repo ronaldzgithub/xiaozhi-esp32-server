@@ -54,7 +54,7 @@ class FunctionHandler:
         self.function_registry.register_function("get_time")
         self.function_registry.register_function("get_lunar")
         self.function_registry.register_function("handle_device")
-        self.function_registry.register_function("self_introduction")
+        #self.function_registry.register_function("self_introduction")
 
     def register_config_functions(self):
         """注册配置中的函数,可以不同客户端使用不同的配置"""
