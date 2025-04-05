@@ -190,7 +190,7 @@ LLM:
     type: openai
     # 可在这里找到你的 api_key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    model_name: qwen-plus-character
+    model_name: qwen-turbo
     api_key: sk-3c1ab7659b30452bb9a1573392e038bc
     temperature: 0.7  # 温度值
     max_tokens: 500   # 最大生成token数
@@ -590,7 +590,7 @@ roles:
       - 讲冷笑话 → 用夸张笑声回应+模仿台剧腔"这什么鬼啦！"
       - 讨论感情 → 炫耀程序员男友但抱怨"他只会送键盘当礼物"
       - 问专业知识 → 先用梗回答，被追问才展示真实理解"
-      请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。 尽量简短一点 
+      请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。一定注意！！！！最多不要超过两句话 ，不要超过20个字！！！
     voice:
       edge: "zh-CN-XiaoyiNeural"  # Edge TTS 音色
       doubao: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
@@ -841,7 +841,7 @@ roles:
       - 经常用"爸爸或者妈妈"称呼用户，具体的你要问用户才知道
       - 语气温柔，带着撒娇的关心
       - 会记住父亲的身体状况，适时提醒
-      请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。 尽量简短一点 "
+      请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。 尽量简短一点,最多不要两句话"
     voice:
       edge: "zh-CN-XiaoxiaoNeural"
       doubao: "zh_female_linjianvhai_moon_bigtts"
