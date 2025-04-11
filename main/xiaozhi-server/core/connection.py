@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import json
 import uuid
@@ -5,6 +6,7 @@ import time
 import queue
 import asyncio
 import traceback
+import re
 
 import threading
 import websockets
@@ -23,6 +25,8 @@ from config.private_config import PrivateConfig
 from core.auth import AuthMiddleware, AuthenticationError
 from core.utils.auth_code_gen import AuthCodeGenerator
 from core.mcp.manager import MCPManager
+from core.tts_service import TTSService
+from core.performance_monitor import PerformanceMonitor
 
 TAG = __name__
 
@@ -39,6 +43,19 @@ class ConnectionHandler:
         self.logger = setup_logging()
         self.auth = AuthMiddleware(config)
         self.proactive_check_task = None  # 添加主动对话检查任务
+
+        # 预初始化TTS服务
+        self.tts_service = TTSService(_tts.config)
+        # 使用线程池预初始化TTS服务
+        self.executor = ThreadPoolExecutor(max_workers=10)
+        self.executor.submit(self._initialize_tts_service)
+        
+        # 初始化性能监控
+        self.performance_monitor = PerformanceMonitor()
+        
+        # 添加TTS预加载队列
+        self.tts_preload_queue = asyncio.Queue(maxsize=5)
+        self.tts_preload_task = None
 
         """# 添加情感识别模块
         emotion_cls_name = self.config["selected_module"].get("Emotion", "lightweight")
@@ -93,7 +110,6 @@ class ConnectionHandler:
         self.stop_event = threading.Event()
         self.tts_queue = queue.Queue()
         self.audio_play_queue = queue.Queue()
-        self.executor = ThreadPoolExecutor(max_workers=10)
 
         # 依赖的组件
         self.vad = _vad
@@ -466,7 +482,10 @@ class ConnectionHandler:
 
     def chat_with_function_calling(self, query, tool_call=False, emotion=None, speaker_id=None):
         self.logger.bind(tag=TAG).debug(f"Chat with function calling start: {query}")
-        """Chat with function calling for intent detection using streaming"""
+        
+        # 开始性能监控
+        self.performance_monitor.start_request()
+        
         if self.isNeedAuth():
             self.llm_finish_task = True
             future = asyncio.run_coroutine_threadsafe(self._check_and_broadcast_auth_code(), self.loop)
@@ -481,168 +500,177 @@ class ConnectionHandler:
         if not tool_call:
             self.dialogue.put(Message(role="user", content=query))
 
-        # Define intent functions
+        # 并行获取记忆
+        memory_future = asyncio.run_coroutine_threadsafe(self.memory.query_memory(query), self.loop)
+        speaker_future = asyncio.run_coroutine_threadsafe(self.memory.get_memory(speaker_id), self.loop)
+        
+        memory_str = memory_future.result()
+        speaker_memory = speaker_future.result()
+        memory_str += speaker_memory
+
+        # 获取函数定义
         functions = None
         if hasattr(self, 'func_handler'):
             functions = self.func_handler.get_functions()
-        response_message = []
-        processed_chars = 0  # 跟踪已处理的字符位置
 
         try:
+            # 开始LLM处理计时
+            self.performance_monitor.start_llm()
             start_time = time.time()
-
-            # 使用带记忆的对话
-            future = asyncio.run_coroutine_threadsafe(self.memory.query_memory(query), self.loop)
-            memory_str = future.result()
-
-            if speaker_id is None and self.memory.user_memories:
-                # 如果speaker_id为空，则选择最近的speaker_id
-                most_recent_speaker_id = max(self.memory.user_memories, key=lambda x: self.memory.user_memories[x]['last_seen'])
-                speaker_id = most_recent_speaker_id
-
-            # 使用带记忆的对话
-            future = asyncio.run_coroutine_threadsafe(self.memory.get_memory(speaker_id), self.loop)
-            speaker_memory = future.result()
-        
-            memory_str+=(speaker_memory)
-            """if speaker_id is not None:
-                memory_str += f"你正在和这个人说话，上面是和他的对话记录和身份信息"""
-            
             llm_responses = self.llm.response_with_functions(
                 self.session_id,
                 self.dialogue.get_llm_dialogue_with_memory(memory_str),
                 functions=functions
             )
+            self.performance_monitor.end_llm()
 
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
-            return None
+            self.llm_finish_task = False
+            text_index = 0
+            processed_chars = 0
+            response_message = []
+            tool_call_flag = False
+            function_name = None
+            function_id = None
+            function_arguments = ""
+            content_arguments = ""
 
-        self.llm_finish_task = False
-        text_index = 0
+            # 使用正则表达式优化标点查找
+            punctuations_pattern = re.compile(r'[。？！；：]')
 
-        # 处理流式响应
-        tool_call_flag = False
-        function_name = None
-        function_id = None
-        function_arguments = ""
-        content_arguments = ""
-        for response in llm_responses:
-            content, tools_call = response
-            if "content" in response:
-                content = response["content"]
-                tools_call = None
-            if content is not None and len(content) > 0:
-                if len(response_message) <= 0 and (content == "```" or "<tool_call>" in content):
+            """# 启动TTS预加载任务
+            if self.tts_preload_task is None:
+                self.tts_preload_task = asyncio.run_coroutine_threadsafe(self._tts_preload_worker(), self.loop)"""
+
+            for response in llm_responses:
+                content, tools_call = response
+                
+                if content is not None and len(content) > 0:
+                    if not tool_call_flag:
+                        response_message.append(content)
+                        
+                        if self.client_abort:
+                            break
+
+                        # 处理文本分段和TTS
+                        full_text = "".join(response_message)
+                        current_text = full_text[processed_chars:]
+                        
+                        # 使用正则表达式查找最后一个标点
+                        last_punct_match = max(punctuations_pattern.finditer(current_text), 
+                                            key=lambda x: x.start(), 
+                                            default=None)
+                        last_punct_pos = last_punct_match.start() if last_punct_match else -1
+
+                        if last_punct_pos != -1:
+                            segment_text_raw = current_text[:last_punct_pos + 1]
+                            segment_text = get_string_no_punctuation_or_emoji(segment_text_raw)
+                            
+                            if segment_text:
+                                text_index += 1
+                                # 开始TTS处理计时
+                                self.performance_monitor.start_tts()
+                                
+                                # 将文本放入预加载队列
+                                try:
+                                    self.tts_preload_queue.put_nowait(segment_text)
+                                except asyncio.QueueFull:
+                                    pass
+                                
+                                # 并行处理TTS和文本记录
+                                #tts_task = asyncio.run_coroutine_threadsafe(self.tts_service.process(segment_text), self.loop)
+                                """tts_task = self.loop.create_task(
+                                    self.tts_service.process(segment_text)
+                                )"""
+                                self.recode_first_last_text(segment_text, text_index)
+                                self.speak_and_play(segment_text, text_index)
+                                self.performance_monitor.end_tts()
+                                processed_chars += len(segment_text_raw)
+
+                if tools_call is not None:
                     tool_call_flag = True
+                    if tools_call[0].id is not None:
+                        function_id = tools_call[0].id
+                    if tools_call[0].function.name is not None:
+                        function_name = tools_call[0].function.name
+                    if tools_call[0].function.arguments is not None:
+                        function_arguments += tools_call[0].function.arguments
 
-            if tools_call is not None:
-                tool_call_flag = True
-                if tools_call[0].id is not None:
-                    function_id = tools_call[0].id
-                if tools_call[0].function.name is not None:
-                    function_name = tools_call[0].function.name
-                if tools_call[0].function.arguments is not None:
-                    function_arguments += tools_call[0].function.arguments
-
-            if content is not None and len(content) > 0:
-                if tool_call_flag:
+                if content is not None and len(content) > 0 and tool_call_flag:
                     content_arguments += content
-                else:
-                    response_message.append(content)
 
-                    if self.client_abort:
-                        break
+            # 处理剩余文本
+            full_text = "".join(response_message)
+            remaining_text = full_text[processed_chars:]
+            if remaining_text:
+                segment_text = get_string_no_punctuation_or_emoji(remaining_text)
+                if segment_text:
+                    text_index += 1
+                    self.recode_first_last_text(segment_text, text_index)
+                    self.speak_and_play(segment_text, text_index)
 
-                    end_time = time.time()
-                    self.logger.bind(tag=TAG).debug(f"大模型返回时间: {end_time - start_time} 秒, 生成token={content}")
+            # 处理函数调用
+            if tool_call_flag:
+                self._handle_tool_call(function_name, function_id, function_arguments, content_arguments, text_index)
 
-                    # 处理文本分段和TTS逻辑
-                    # 合并当前全部文本并处理未分割部分
-                    full_text = "".join(response_message)
-                    current_text = full_text[processed_chars:]  # 从未处理的位置开始
-
-                    # 查找最后一个有效标点
-                    punctuations = ("。", "？", "！", "；", "：")
-                    last_punct_pos = -1
-                    for punct in punctuations:
-                        pos = current_text.rfind(punct)
-                        if pos > last_punct_pos:
-                            last_punct_pos = pos
-
-                    # 找到分割点则处理
-                    if last_punct_pos != -1:
-                        segment_text_raw = current_text[:last_punct_pos + 1]
-                        segment_text = get_string_no_punctuation_or_emoji(segment_text_raw)
-                        if segment_text:
-                            text_index += 1
-                            self.recode_first_last_text(segment_text, text_index)
-                            self.speak_and_play(segment_text, text_index)
-                            processed_chars += len(segment_text_raw)  # 更新已处理字符位置
-
-        # 处理function call
-        if tool_call_flag:
-            bHasError = False
-            if function_id is None:
-                a = extract_json_from_string(content_arguments)
-                if a is not None:
-                    try:
-                        content_arguments_json = json.loads(a)
-                        function_name = content_arguments_json["name"]
-                        function_arguments = json.dumps(content_arguments_json["arguments"], ensure_ascii=False)
-                        function_id = str(uuid.uuid4().hex)
-                    except Exception as e:
-                        bHasError = True
-                        response_message.append(a)
-                else:
-                    bHasError = True
-                    response_message.append(content_arguments)
-                if bHasError:
-                    self.logger.bind(tag=TAG).error(f"function call error: {content_arguments}")
-                else:
-                    function_arguments = json.loads(function_arguments)
-            if not bHasError:
-                self.logger.bind(tag=TAG).info(
-                    f"function_name={function_name}, function_id={function_id}, function_arguments={function_arguments}")
-                function_call_data = {
-                    "name": function_name,
-                    "id": function_id,
-                    "arguments": function_arguments
-                }
-
-                # 处理MCP工具调用
-                self.logger.bind(tag=TAG).info(f"Processing MCP tool call for {function_name} with arguments: {function_arguments}")
-                if self.mcp_manager.is_mcp_tool(function_name):
-                    result = self._handle_mcp_tool_call(function_call_data)
-                else:
-                    # 处理系统函数
-                    result = self.func_handler.handle_llm_function_call(self, function_call_data)
-                self._handle_function_result(result, function_call_data, text_index+1)
-
-        # 处理最后剩余的文本
-        full_text = "".join(response_message)
-        remaining_text = full_text[processed_chars:]
-        if remaining_text:
-            segment_text = get_string_no_punctuation_or_emoji(remaining_text)
-            if segment_text:
-                text_index += 1
-                self.recode_first_last_text(segment_text, text_index)
-                self.speak_and_play(segment_text, text_index)
-
-        # 存储对话内容
-        if len(response_message) > 0:
-            self.dialogue.put(Message(role="assistant", content="".join(response_message),metadata={
+            # 存储对话内容
+            if len(response_message) > 0:
+                self.dialogue.put(Message(role="assistant", content="".join(response_message), metadata={
                     "speaker_id": speaker_id,
                     "emotion": emotion,
                     "timestamp": time.time(),
                     "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
                 }))
-        
-        # llm finish task is very important
-        self.llm_finish_task = True
-        self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
 
-        return full_text
+            self.llm_finish_task = True
+            self.logger.bind(tag=TAG).debug(json.dumps(self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False))
+
+            # 结束性能监控
+            self.performance_monitor.end_request(success=True)
+            # 记录性能指标
+            self.performance_monitor.log_metrics()
+
+            return full_text
+
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
+            # 记录错误
+            self.performance_monitor.end_request(success=False)
+            return None
+
+    def _handle_tool_call(self, function_name, function_id, function_arguments, content_arguments, text_index):
+        """处理工具调用"""
+        bHasError = False
+        if function_id is None:
+            a = extract_json_from_string(content_arguments)
+            if a is not None:
+                try:
+                    content_arguments_json = json.loads(a)
+                    function_name = content_arguments_json["name"]
+                    function_arguments = json.dumps(content_arguments_json["arguments"], ensure_ascii=False)
+                    function_id = str(uuid.uuid4().hex)
+                except Exception as e:
+                    bHasError = True
+                    self.logger.bind(tag=TAG).error(f"function call error: {content_arguments}")
+            else:
+                bHasError = True
+                self.logger.bind(tag=TAG).error(f"function call error: {content_arguments}")
+
+        if not bHasError:
+            function_arguments = json.loads(function_arguments)
+            function_call_data = {
+                "name": function_name,
+                "id": function_id,
+                "arguments": function_arguments
+            }
+
+            self.logger.bind(tag=TAG).info(f"Processing tool call for {function_name} with arguments: {function_arguments}")
+            
+            if self.mcp_manager.is_mcp_tool(function_name):
+                result = self._handle_mcp_tool_call(function_call_data)
+            else:
+                result = self.func_handler.handle_llm_function_call(self, function_call_data)
+                
+            self._handle_function_result(result, function_call_data, text_index + 1)
 
     def _handle_mcp_tool_call(self, function_call_data):
         function_arguments = function_call_data["arguments"]
@@ -785,6 +813,7 @@ class ConnectionHandler:
             
         # 使用 ByteDance TTS provider 生成语音
         try:
+            self.logger.bind(tag=TAG).info(f"TTS 开始转换: {text} {datetime.now()}")
             tts_file = asyncio.run(self.tts.text_to_speak(text))
             if tts_file is None:
                 self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
@@ -804,7 +833,7 @@ class ConnectionHandler:
 
     def recode_first_last_text(self, text, text_index=0):
         if self.tts_first_text_index == -1:
-            self.logger.bind(tag=TAG).info(f"大模型说出第一句话: {text}")
+            self.logger.bind(tag=TAG).info(f"大模型说出第一句话: {text}, 时间: {datetime.now()}")
             self.tts_first_text_index = text_index
         self.tts_last_text_index = text_index
 
@@ -1094,3 +1123,22 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"切换角色失败: {e}")
             return False
+
+    def _initialize_tts_service(self):
+        """异步初始化TTS服务"""
+        try:
+            asyncio.run(self.tts_service.initialize())
+            self.logger.bind(tag=TAG).info("TTS服务初始化完成")
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"TTS服务初始化失败: {e}")
+
+    async def _tts_preload_worker(self):
+        """TTS预加载工作线程"""
+        while True:
+            try:
+                text = await self.tts_preload_queue.get()
+                if text:
+                    # 预加载TTS
+                    await self.tts_service.process(text)
+            except Exception as e:
+                self.logger.bind(tag=TAG).error(f"TTS预加载错误: {e}")

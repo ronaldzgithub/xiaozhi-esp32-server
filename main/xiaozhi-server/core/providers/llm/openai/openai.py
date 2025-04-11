@@ -1,3 +1,4 @@
+from datetime import datetime
 import openai
 from config.logger import setup_logging
 from core.utils.util import check_model_key
@@ -53,7 +54,7 @@ class LLMProvider(LLMProviderBase):
 
     def response_with_functions(self, session_id, dialogue, functions=None):
         try:
-
+            logger.bind(tag=TAG).info(f"OpenAI response_with_functions: sending {dialogue} , {datetime.now()}")
             stream = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=dialogue,

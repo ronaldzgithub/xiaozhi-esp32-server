@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import json
 import os
 import uuid
@@ -272,7 +273,7 @@ async def finish_connection(ws):
 class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file=False):
         super().__init__(config, delete_audio_file)
-
+        self.config = config
         self.app_id = config.get("appid")
         self.token = config.get("access_token")
         self.speaker = config.get("voice", "zh_female_shuangkuaisisi_moon_bigtts")
@@ -289,7 +290,8 @@ class TTSProvider(TTSProviderBase):
         self.session_id = None  # 会话ID
         self.tts_queue = None  # 将由 connection.py 设置
         self.audio_play_queue = None  # 将由 connection.py 设置
-        self.pending_texts = asyncio.Queue()  # 使用 Queue 来存储待处理的文本
+        self.max_queue_size = config.get("max_queue_size", 100)  # 添加队列大小限制
+        self.pending_texts = asyncio.Queue(maxsize=self.max_queue_size)  # 设置队列最大大小
         # Initialize WebSocket connection asynchronously
         asyncio.create_task(self._session_manager())
 
@@ -349,40 +351,49 @@ class TTSProvider(TTSProviderBase):
     async def _process_text(self, text_info):
         """处理单个文本"""
         try:
+            start_time = datetime.now()
+            logger.bind(tag=TAG).info(f"Starting _process_text at {start_time} for: {text_info['text']}")
+            
             # Start session
+            session_start_time = datetime.now()
             self.session_id = uuid.uuid4().__str__().replace('-', '')
             await start_session(self.ws, self.voice, self.session_id)
             res = parser_response(await self.ws.recv())
-            logger.bind(tag=TAG).info(f"Start session response: {res.optional.__dict__}")
+            logger.bind(tag=TAG).info(f"Session started in {(datetime.now() - session_start_time).total_seconds():.2f}s")
             
             if res.optional.event != EVENT_SessionStarted:
                 raise RuntimeError(f"Start session failed: {res.optional.__dict__}")
             
             # 发送文本
+            text_send_time = datetime.now()
             await send_text(self.ws, self.voice, text_info['text'], self.session_id)
+            logger.bind(tag=TAG).info(f"Text sent in {(datetime.now() - text_send_time).total_seconds():.2f}s")
+            
             # 结束当前会话
             await finish_session(self.ws, self.session_id)
-            
+
             # 处理音频数据
+            audio_process_start = datetime.now()
             all_payloads = []
             while True:
                 try:
                     res = parser_response(await self.ws.recv())
-                    logger.bind(tag=TAG).debug(f"TTS response: {res.optional.__dict__}")
                     
                     if res.optional.event == EVENT_TTSResponse and res.header.message_type == AUDIO_ONLY_RESPONSE:
                         all_payloads.append(res.payload)
-                            
                     elif res.optional.event in [EVENT_TTSSentenceStart, EVENT_TTSSentenceEnd]:
                         continue
                     else:
                         break
                 except websockets.exceptions.ConnectionClosed:
                     logger.bind(tag=TAG).error("WebSocket connection closed, attempting to reconnect...")
-                    await self._init_websocket()  # Try to reconnect
+                    await self._init_websocket()
                     continue
+
+            logger.bind(tag=TAG).info(f"Audio processing took {(datetime.now() - audio_process_start).total_seconds():.2f}s")
             
             # 所有音频数据收集完成后，一次性转换为opus格式
+            opus_convert_start = datetime.now()
             all_opus_data = []
             if all_payloads:
                 try:
@@ -398,10 +409,13 @@ class TTSProvider(TTSProviderBase):
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"Error processing combined audio data: {e}")
             
+            logger.bind(tag=TAG).info(f"Opus conversion took {(datetime.now() - opus_convert_start).total_seconds():.2f}s")
+            
             # 发送到 audio_play_queue
+            queue_send_start = datetime.now()
             if self.audio_play_queue is not None and all_opus_data:
                 self.audio_play_queue.put((all_opus_data, text_info['text'], text_info['text_id']))
-                logger.bind(tag=TAG).debug(f"All audio packets sent to audio_play_queue")
+                logger.bind(tag=TAG).info(f"Audio sent to play queue in {(datetime.now() - queue_send_start).total_seconds():.2f}s")
             elif not all_opus_data:
                 logger.bind(tag=TAG).error("No audio data collected")
             else:
@@ -409,6 +423,9 @@ class TTSProvider(TTSProviderBase):
             
             if res.optional.event != EVENT_SessionFinished:
                 raise RuntimeError(f"Finish session failed: {res.optional.__dict__}")
+            
+            total_time = (datetime.now() - start_time).total_seconds()
+            logger.bind(tag=TAG).info(f"Total processing time: {total_time:.2f}s for text_id: {text_info['text_id']}")
                 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Error processing text: {e}")
@@ -421,14 +438,29 @@ class TTSProvider(TTSProviderBase):
         
         while not self.stop_event.is_set():
             try:
-                # 等待新的文本
-                text_info = await self.pending_texts.get()
-                await self._process_text(text_info)
-                self.pending_texts.task_done()
+                # 等待新的文本，设置超时时间
+                try:
+                    queue_wait_start = datetime.now()
+                    text_info = await asyncio.wait_for(self.pending_texts.get(), timeout=115.0)
+                    queue_wait_time = (datetime.now() - queue_wait_start).total_seconds()
+                    logger.bind(tag=TAG).info(f"Queue wait time: {text_info['text']} {queue_wait_time:.2f}s")
+                    
+                    if queue_wait_time > 1.0:  # 如果等待时间超过1秒，记录警告
+                        logger.bind(tag=TAG).warning(f"Long queue wait time detected: {queue_wait_time:.2f}s")
+                    
+                    logger.bind(tag=TAG).info(f"Processing text: {text_info['text']} {datetime.now()}")
+                    await self._process_text(text_info)
+                    self.pending_texts.task_done()
+                    logger.bind(tag=TAG).info(f"Processing text Done: {text_info['text']} {datetime.now()}")
+                except asyncio.TimeoutError:
+                    # 如果超时，检查连接状态
+                    if not self.ws or self.ws.state == websockets.State.CLOSED:
+                        logger.bind(tag=TAG).info("WebSocket connection lost, attempting to reconnect...")
+                        await self._init_websocket()
+                    continue
                 
             except Exception as e:
                 logger.bind(tag=TAG).error(f"Error in session manager: {e}")
-                await asyncio.sleep(0.1)  # 短暂休眠以避免过度占用CPU
                 continue
 
     async def text_to_speak(self, text, output_file=None):
@@ -454,16 +486,27 @@ class TTSProvider(TTSProviderBase):
                 'audio_file': output_file
             }
             
-            # 将文本添加到队列中
-            await self.pending_texts.put(text_info)
             
+            logger.bind(tag=TAG).info(f"Before put: {text} {datetime.now()}")
+            # 检查队列是否已满
+            if self.pending_texts.full():
+                logger.bind(tag=TAG).warning("TTS queue is full, waiting for space...")
+                # 等待队列有空间
+                await asyncio.wait_for(self.pending_texts.put(text_info), timeout=30.0)
+            else:
+                # 直接放入队列
+                await self.pending_texts.put(text_info)
+
+            #await self._process_text(text_info)
+            # 记录时间和文本
+            logger.bind(tag=TAG).info(f"After put  text at: {datetime.now()} - Text: {text}")
             return True
+        except asyncio.TimeoutError:
+            logger.bind(tag=TAG).error("Timeout while waiting to add text to queue")
+            return False
         except Exception as e:
             logger.bind(tag=TAG).error(f"ByteDance TTS error: {e}")
-            # 更新文本-音频对应关系的状态为失败
-            if text_id in self.text_audio_map:
-                self.text_audio_map[text_id]['status'] = 'failed'
-            raise e
+            return False
 
     def get_text_audio_map(self):
         """获取文本和音频的对应关系"""

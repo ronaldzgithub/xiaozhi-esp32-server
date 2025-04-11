@@ -345,6 +345,7 @@ TTS:
     voice: zh_female_wanwanxiaohe_moon_bigtts
     appid: "7864085684"
     access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
+    output_dir: tmp/
   CosyVoiceSiliconflow:
     type: siliconflow
     # 硅基流动TTS

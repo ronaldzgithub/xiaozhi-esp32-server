@@ -214,10 +214,12 @@ class MemoryProvider(MemoryProviderBase):
                     for memory in memories:
                         if 'metadata' in memory:
                             del memory['metadata']
+                        if 'timestamp' in memory:
+                            del memory['timestamp']
 
                     short_memory = self.user_memories[speaker_id].get("short_memory", [])
 
-                    mem = '这是你和用户的的通话记录【注意这里都是用户说过的话，你说过的话不在这里】：'+''.join([str(item) for item in memories]) + '\n'
+                    mem = '这是你和用户的的通话记录【注意这里都是用户说过的话，你说过的话不在这里】：'+';'.join([str(item['messages']) for item in memories]) + '\n'
                     if short_memory:
                         mem += '\n【重要！！！】用户的一些信息，以及用户的一些记忆：'+''.join([str(item) for item in short_memory])
                     return mem
