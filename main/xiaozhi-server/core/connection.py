@@ -45,7 +45,7 @@ class ConnectionHandler:
         self.proactive_check_task = None  # 添加主动对话检查任务
 
         # 预初始化TTS服务
-        self.tts_service = TTSService(_tts.config)
+        #self.tts_service = TTSService(_tts.config)
         # 使用线程池预初始化TTS服务
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.executor.submit(self._initialize_tts_service)
@@ -583,9 +583,10 @@ class ConnectionHandler:
                                 )"""
                                 self.recode_first_last_text(segment_text, text_index)
                                 self.speak_and_play(segment_text, text_index)
+                               
                                 self.performance_monitor.end_tts()
                                 processed_chars += len(segment_text_raw)
-
+                                
                 if tools_call is not None:
                     tool_call_flag = True
                     if tools_call[0].id is not None:

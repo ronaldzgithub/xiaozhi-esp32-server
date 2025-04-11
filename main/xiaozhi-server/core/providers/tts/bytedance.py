@@ -452,6 +452,7 @@ class TTSProvider(TTSProviderBase):
                     await self._process_text(text_info)
                     self.pending_texts.task_done()
                     logger.bind(tag=TAG).info(f"Processing text Done: {text_info['text']} {datetime.now()}")
+
                 except asyncio.TimeoutError:
                     # 如果超时，检查连接状态
                     if not self.ws or self.ws.state == websockets.State.CLOSED:
