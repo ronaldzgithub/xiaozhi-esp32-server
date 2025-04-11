@@ -81,7 +81,7 @@ selected_module:
   # 将根据配置名称对应的type调用实际的LLM适配器
   LLM: AliLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
-  TTS: DoubaoTTS
+  TTS: bytedanceStream
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
   Memory: mem_local_short
   # 意图识别模块，默认使用function_call。开启后，可以播放音乐、控制音量、识别退出指令
@@ -338,6 +338,13 @@ TTS:
     appid: "7864085684"
     access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
     cluster: volcano_tts
+  bytedanceStream:
+    # 定义TTS API类型
+    type: bytedance
+    url: wss://openspeech.bytedance.com/api/v3/tts/bidirection
+    voice: zh_female_wanwanxiaohe_moon_bigtts
+    appid: "7864085684"
+    access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
   CosyVoiceSiliconflow:
     type: siliconflow
     # 硅基流动TTS

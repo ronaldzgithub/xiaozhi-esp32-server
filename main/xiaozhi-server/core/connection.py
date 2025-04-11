@@ -103,6 +103,11 @@ class ConnectionHandler:
         self.memory = _memory
         self.intent = _intent
 
+        # 设置 TTS 队列
+        if hasattr(self.tts, 'set_tts_queue'):
+            self.tts.set_tts_queue(self.tts_queue)
+            self.logger.bind(tag=TAG).info("TTS queue has been set in TTSProvider")
+
         # vad相关变量
         self.client_audio_buffer = bytes()
         self.client_have_voice = False
@@ -167,6 +172,9 @@ class ConnectionHandler:
             self.family_wizard = None
             self.is_adding_family_member = False
 
+        # 设置 TTS 音频播放队列
+        self.tts.set_audio_play_queue(self.audio_play_queue)
+
     async def handle_connection(self, ws):
         try:
             # 获取并验证headers
@@ -215,9 +223,9 @@ class ConnectionHandler:
 
             # 异步初始化
             self.executor.submit(self._initialize_components)
-            # tts 消化线程
+            """# tts 消化线程
             self.tts_priority_thread = threading.Thread(target=self._tts_priority_thread, daemon=True)
-            self.tts_priority_thread.start()
+            self.tts_priority_thread.start()"""
 
             # 音频播放 消化线程
             self.audio_play_priority_thread = threading.Thread(target=self._audio_play_priority_thread, daemon=True)
@@ -419,8 +427,9 @@ class ConnectionHandler:
                 if segment_text:
                     text_index += 1
                     self.recode_first_last_text(segment_text, text_index)
-                    future = self.executor.submit(self.speak_and_play, segment_text, text_index)
-                    self.tts_queue.put(future)
+                    # 使用 ByteDance TTS provider 生成语音
+                    self.speak_and_play(segment_text, text_index)
+
                     processed_chars += len(segment_text_raw)  # 更新已处理字符位置
 
         # 处理最后剩余的文本
@@ -431,8 +440,8 @@ class ConnectionHandler:
             if segment_text:
                 text_index += 1
                 self.recode_first_last_text(segment_text, text_index)
-                future = self.executor.submit(self.speak_and_play, segment_text, text_index)
-                self.tts_queue.put(future)
+                # 使用 ByteDance TTS provider 生成语音
+                self.speak_and_play(segment_text, text_index)
 
         self.llm_finish_task = True
         response_text = "".join(response_message)
@@ -568,8 +577,7 @@ class ConnectionHandler:
                         if segment_text:
                             text_index += 1
                             self.recode_first_last_text(segment_text, text_index)
-                            future = self.executor.submit(self.speak_and_play, segment_text, text_index)
-                            self.tts_queue.put(future)
+                            self.speak_and_play(segment_text, text_index)
                             processed_chars += len(segment_text_raw)  # 更新已处理字符位置
 
         # 处理function call
@@ -619,8 +627,7 @@ class ConnectionHandler:
             if segment_text:
                 text_index += 1
                 self.recode_first_last_text(segment_text, text_index)
-                future = self.executor.submit(self.speak_and_play, segment_text, text_index)
-                self.tts_queue.put(future)
+                self.speak_and_play(segment_text, text_index)
 
         # 存储对话内容
         if len(response_message) > 0:
@@ -775,10 +782,17 @@ class ConnectionHandler:
         if text is None or len(text) <= 0:
             self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
             return None, text, text_index
-        tts_file = self.tts.to_tts(text)
-        if tts_file is None:
-            self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
+            
+        # 使用 ByteDance TTS provider 生成语音
+        try:
+            tts_file = asyncio.run(self.tts.text_to_speak(text))
+            if tts_file is None:
+                self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
+                return None, text, text_index
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"tts转换异常: {e}")
             return None, text, text_index
+            
         self.logger.bind(tag=TAG).debug(f"TTS 文件生成完毕: {tts_file}")
         return tts_file, text, text_index
 
@@ -852,25 +866,21 @@ class ConnectionHandler:
     async def send_text_response(self, text):
         """发送文本响应"""
         try:
-            # 语音合成
-            tts_file, text, text_index = await self.speak_and_play(text)
+            # 直接使用 ByteDance TTS provider 生成语音
+            tts_file = await self.tts.text_to_speak(text)
             if not tts_file:
+                self.logger.bind(tag=TAG).error(f"TTS生成失败: {text}")
                 return
 
             # 发送音频响应
             await self.send_audio_response(tts_file)
 
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}，重试中")
-            try:
-                future = self.executor.submit(self.speak_and_play, text)
-                self.tts_queue.put(future)
-            except Exception as e:                   
-                self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
-                self.logger.bind(tag=TAG).error(f"错误详情: {str(e)}")
-                self.logger.bind(tag=TAG).error(f"错误类型: {type(e)}")
-                if hasattr(e, '__traceback__'):
-                    self.logger.bind(tag=TAG).error(f"堆栈跟踪: {e.__traceback__}")
+            self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
+            self.logger.bind(tag=TAG).error(f"错误详情: {str(e)}")
+            self.logger.bind(tag=TAG).error(f"错误类型: {type(e)}")
+            if hasattr(e, '__traceback__'):
+                self.logger.bind(tag=TAG).error(f"堆栈跟踪: {e.__traceback__}")
 
     async def check_proactive_dialogue(self):
         """检查是否需要发起主动对话"""
@@ -893,8 +903,7 @@ class ConnectionHandler:
 
 
     async def send_full_audio_message(self, content):
-
-         # 检查系统是否正在说话
+        # 检查系统是否正在说话
         if not self.asr_server_receive:
             self.logger.bind(tag=TAG).debug(f"系统正在说话，skip sending content {content}")
             return False
@@ -902,8 +911,12 @@ class ConnectionHandler:
         """开始主动对话"""
         # 添加到对话历史并开始对话
         await send_stt_message(self, content)
-        future = self.executor.submit(self.speak_and_play, content,-1)
-        self.tts_queue.put(future)
+        
+        # 直接使用 ByteDance TTS provider 生成语音
+        tts_file = await self.tts.text_to_speak(content)
+        if tts_file:
+            await self.send_audio_response(tts_file)
+        
         self.llm_finish_task = True
         self.asr_server_receive = True
         self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")

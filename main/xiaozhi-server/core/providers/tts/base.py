@@ -1,4 +1,5 @@
 import asyncio
+import io
 from config.logger import setup_logging
 import os
 import numpy as np
@@ -49,20 +50,24 @@ class TTSProviderBase(ABC):
     def audio_to_opus_data(self, audio_file_path):
         """音频文件转换为Opus编码"""
         # 获取文件后缀名
+        # 获取文件后缀名
         file_type = os.path.splitext(audio_file_path)[1]
         if file_type:
             file_type = file_type.lstrip('.')
         # 读取音频文件，-nostdin 参数：不要从标准输入读取数据，否则FFmpeg会阻塞
         audio = AudioSegment.from_file(audio_file_path, format=file_type, parameters=["-nostdin"])
-
         # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
         audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+            # 获取原始PCM数据（16位小端）         
+    
+        return self.audio_to_opus_data_directly(audio)
 
+    def audio_to_opus_data_directly(self, audio):
+        """音频文件转换为Opus编码"""
+        
+        raw_data = audio.raw_data
         # 音频时长(秒)
         duration = len(audio) / 1000.0
-
-        # 获取原始PCM数据（16位小端）
-        raw_data = audio.raw_data
 
         # 初始化Opus编码器
         encoder = opuslib_next.Encoder(16000, 1, opuslib_next.APPLICATION_AUDIO)

@@ -26,3 +26,5 @@ mcp==1.4.1
 cnlunar==0.2.0
 speechbrain==1.0.2
 PySocks==1.7.1
+websockets==14.2
+websocket

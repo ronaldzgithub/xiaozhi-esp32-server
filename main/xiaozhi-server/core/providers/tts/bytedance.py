@@ -7,6 +7,10 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 from config.logger import setup_logging
 from core.providers.tts.base import TTSProviderBase
+import threading
+from concurrent.futures import Future
+import io
+from pydub import AudioSegment
 
 TAG = __name__
 logger = setup_logging()
@@ -123,7 +127,7 @@ class Response:
 
 
 # 发送事件
-async def send_event(ws: websocket, header: bytes, optional: bytes | None = None,
+async def send_event(ws, header: bytes, optional: bytes | None = None,
                      payload: bytes = None):
     full_client_request = bytearray(header)
     if optional is not None:
@@ -137,7 +141,7 @@ async def send_event(ws: websocket, header: bytes, optional: bytes | None = None
 
 # 读取 res 数组某段 字符串内容
 def read_res_content(res: bytes, offset: int):
-    content_size = int.from_bytes(res[offset: offset + 4])
+    content_size = int.from_bytes(res[offset: offset + 4], 'big')
     offset += 4
     content = str(res[offset: offset + content_size])
     offset += content_size
@@ -146,7 +150,7 @@ def read_res_content(res: bytes, offset: int):
 
 # 读取 payload
 def read_res_payload(res: bytes, offset: int):
-    payload_size = int.from_bytes(res[offset: offset + 4])
+    payload_size = int.from_bytes(res[offset: offset + 4], 'big')
     offset += 4
     payload = res[offset: offset + payload_size]
     offset += payload_size
@@ -166,16 +170,16 @@ def parser_response(res) -> Response:
     header.header_size = res[0] & 0x0f
     header.message_type = (res[1] >> 4) & num
     header.message_type_specific_flags = res[1] & 0x0f
-    header.serialization_method = res[2] >> num
-    header.message_compression = res[2] & 0x0f
-    header.reserved = res[3]
+    header.serial_method = res[2] >> num
+    header.compression_type = res[2] & 0x0f
+    header.reserved_data = res[3]
     #
     offset = 4
     optional = response.optional
     if header.message_type == FULL_SERVER_RESPONSE or AUDIO_ONLY_RESPONSE:
         # read event
         if header.message_type_specific_flags == MsgTypeFlagWithEvent:
-            optional.event = int.from_bytes(res[offset:8])
+            optional.event = int.from_bytes(res[offset:8], 'big')
             offset += 4
             if optional.event == EVENT_NONE:
                 return response
@@ -265,24 +269,47 @@ async def finish_connection(ws):
     return await send_event(ws, header, optional, payload)
 
 
-class ByteDanceTTSProvider(TTSProviderBase):
+class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file=False):
         super().__init__(config, delete_audio_file)
-        self.app_id = config.get("app_id", "")
-        self.token = config.get("token", "")
-        self.speaker = config.get("speaker", "zh_female_shuangkuaisisi_moon_bigtts")
+
+        self.app_id = config.get("appid")
+        self.token = config.get("access_token")
+        self.speaker = config.get("voice", "zh_female_shuangkuaisisi_moon_bigtts")
         self.voice = self.speaker
         self.audio_format = config.get("audio_format", "mp3")
         self.audio_sample_rate = config.get("audio_sample_rate", 24000)
         self.url = config.get("url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection")
+        self.session_manager = None
+        self.stop_event = threading.Event()
+        self.session_lock = threading.Lock()
+        self.text_audio_map = {}  # 存储文本和音频的对应关系
+        self.current_text_id = None  # 当前正在处理的文本ID
+        self.ws = None  # WebSocket 连接
+        self.session_id = None  # 会话ID
+        self.tts_queue = None  # 将由 connection.py 设置
+        self.audio_play_queue = None  # 将由 connection.py 设置
+        self.pending_texts = asyncio.Queue()  # 使用 Queue 来存储待处理的文本
+        # Initialize WebSocket connection asynchronously
+        asyncio.create_task(self._session_manager())
+
+    def set_tts_queue(self, tts_queue):
+        """设置从 connection.py 传递过来的 tts_queue"""
+        self.tts_queue = tts_queue
+        logger.bind(tag=TAG).info("TTS queue has been set from connection.py")
+
+    def set_audio_play_queue(self, audio_play_queue):
+        """设置从 connection.py 传递过来的 audio_play_queue"""
+        self.audio_play_queue = audio_play_queue
+        logger.bind(tag=TAG).info("Audio play queue has been set from connection.py")
 
     def generate_filename(self):
         """Generate a unique filename for the TTS output"""
         filename = f"bytedance_tts_{uuid.uuid4()}.{self.audio_format}"
         return os.path.join(self.output_file, filename)
 
-    async def text_to_speak(self, text, output_file):
-        """Convert text to speech using ByteDance TTS API"""
+    async def _init_websocket(self):
+        """初始化 WebSocket 连接"""
         try:
             ws_header = {
                 "X-Api-App-Key": self.app_id,
@@ -290,51 +317,161 @@ class ByteDanceTTSProvider(TTSProviderBase):
                 "X-Api-Resource-Id": 'volc.service_type.10029',
                 "X-Api-Connect-Id": str(uuid.uuid4()),
             }
+            logger.bind(tag=TAG).info(f"Connecting to {self.url} with headers: {ws_header}")
+            
+            # Connect without using async with
+            self.ws = await websockets.connect(
+                self.url, 
+                additional_headers=ws_header, 
+                max_size=1000000000,
+                ping_interval=20,  # Add ping interval to keep connection alive
+                ping_timeout=20    # Add ping timeout
+            )
+            
+            # Start connection
+            await start_connection(self.ws)
+            res = parser_response(await self.ws.recv())
+            logger.bind(tag=TAG).info(f"Start connection response: {res.optional.__dict__}")
+            
+            if res.optional.event != EVENT_ConnectionStarted:
+                raise RuntimeError(f"Start connection failed: {res.optional.__dict__}")
 
-            async with websockets.connect(self.url, additional_headers=ws_header, max_size=1000000000) as ws:
-                # Start connection
-                await start_connection(ws)
-                res = parser_response(await ws.recv())
-                logger.bind(tag=TAG).info(f"Start connection response: {res.optional.__dict__}")
                 
-                if res.optional.event != EVENT_ConnectionStarted:
-                    raise RuntimeError(f"Start connection failed: {res.optional.__dict__}")
+            return True
+            
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"WebSocket initialization error: {e}")
+            if self.ws:
+                await self.ws.close()
+                self.ws = None
+            raise e
 
-                # Start session
-                session_id = uuid.uuid4().__str__().replace('-', '')
-                await start_session(ws, self.voice, session_id)
-                res = parser_response(await ws.recv())
-                logger.bind(tag=TAG).info(f"Start session response: {res.optional.__dict__}")
+    async def _process_text(self, text_info):
+        """处理单个文本"""
+        try:
+            # Start session
+            self.session_id = uuid.uuid4().__str__().replace('-', '')
+            await start_session(self.ws, self.voice, self.session_id)
+            res = parser_response(await self.ws.recv())
+            logger.bind(tag=TAG).info(f"Start session response: {res.optional.__dict__}")
+            
+            if res.optional.event != EVENT_SessionStarted:
+                raise RuntimeError(f"Start session failed: {res.optional.__dict__}")
+            
+            # 发送文本
+            await send_text(self.ws, self.voice, text_info['text'], self.session_id)
+            # 结束当前会话
+            await finish_session(self.ws, self.session_id)
+            
+            # 处理音频数据
+            all_payloads = []
+            while True:
+                try:
+                    res = parser_response(await self.ws.recv())
+                    logger.bind(tag=TAG).debug(f"TTS response: {res.optional.__dict__}")
+                    
+                    if res.optional.event == EVENT_TTSResponse and res.header.message_type == AUDIO_ONLY_RESPONSE:
+                        all_payloads.append(res.payload)
+                            
+                    elif res.optional.event in [EVENT_TTSSentenceStart, EVENT_TTSSentenceEnd]:
+                        continue
+                    else:
+                        break
+                except websockets.exceptions.ConnectionClosed:
+                    logger.bind(tag=TAG).error("WebSocket connection closed, attempting to reconnect...")
+                    await self._init_websocket()  # Try to reconnect
+                    continue
+            
+            # 所有音频数据收集完成后，一次性转换为opus格式
+            all_opus_data = []
+            if all_payloads:
+                try:
+                    # 合并所有payload
+                    combined_payload = b''.join(all_payloads)
+                    # 将 MP3 数据转换为 PCM 数据
+                    audio = AudioSegment.from_mp3(io.BytesIO(combined_payload))
+                    # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
+                    audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+                    # 将音频数据转换为 opus 格式
+                    opus_data, _ = self.audio_to_opus_data_directly(audio)
+                    all_opus_data.extend(opus_data)
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"Error processing combined audio data: {e}")
+            
+            # 发送到 audio_play_queue
+            if self.audio_play_queue is not None and all_opus_data:
+                self.audio_play_queue.put((all_opus_data, text_info['text'], text_info['text_id']))
+                logger.bind(tag=TAG).debug(f"All audio packets sent to audio_play_queue")
+            elif not all_opus_data:
+                logger.bind(tag=TAG).error("No audio data collected")
+            else:
+                logger.bind(tag=TAG).error("audio_play_queue is None, cannot send audio packet")
+            
+            if res.optional.event != EVENT_SessionFinished:
+                raise RuntimeError(f"Finish session failed: {res.optional.__dict__}")
                 
-                if res.optional.event != EVENT_SessionStarted:
-                    raise RuntimeError(f"Start session failed: {res.optional.__dict__}")
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"Error processing text: {e}")
 
-                # Send text for TTS
-                await send_text(ws, self.voice, text, session_id)
-                await finish_session(ws, session_id)
+    async def _session_manager(self):
+        """管理会话的进程"""
+        # 初始化 WebSocket 连接
+        if not self.ws:
+            await self._init_websocket()
+        
+        while not self.stop_event.is_set():
+            try:
+                # 等待新的文本
+                text_info = await self.pending_texts.get()
+                await self._process_text(text_info)
+                self.pending_texts.task_done()
                 
-                # Write audio data to file
-                async with aiofiles.open(output_file, mode="wb") as output_file_handle:
-                    while True:
-                        res = parser_response(await ws.recv())
-                        logger.bind(tag=TAG).debug(f"TTS response: {res.optional.__dict__}")
-                        
-                        if res.optional.event == EVENT_TTSResponse and res.header.message_type == AUDIO_ONLY_RESPONSE:
-                            await output_file_handle.write(res.payload)
-                        elif res.optional.event in [EVENT_TTSSentenceStart, EVENT_TTSSentenceEnd]:
-                            continue
-                        else:
-                            break
-                
-                # Finish connection
-                await finish_connection(ws)
-                res = parser_response(await ws.recv())
-                logger.bind(tag=TAG).info(f"Finish connection response: {res.optional.__dict__}")
-                
-                return True
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"Error in session manager: {e}")
+                await asyncio.sleep(0.1)  # 短暂休眠以避免过度占用CPU
+                continue
+
+    async def text_to_speak(self, text, output_file=None):
+        """Convert text to speech using ByteDance TTS API"""
+        try:
+            # 如果 output_file 为 None，生成一个新的文件名
+            if output_file is None:
+                output_file = self.generate_filename()
+
+            # 生成文本ID并记录对应关系
+            text_id = str(uuid.uuid4())
+            self.current_text_id = text_id
+            self.text_audio_map[text_id] = {
+                'text': text,
+                'audio_file': output_file,
+                'status': 'processing'
+            }
+            
+            # 创建文本信息
+            text_info = {
+                'text_id': text_id,
+                'text': text,
+                'audio_file': output_file
+            }
+            
+            # 将文本添加到队列中
+            await self.pending_texts.put(text_info)
+            
+            return True
         except Exception as e:
             logger.bind(tag=TAG).error(f"ByteDance TTS error: {e}")
+            # 更新文本-音频对应关系的状态为失败
+            if text_id in self.text_audio_map:
+                self.text_audio_map[text_id]['status'] = 'failed'
             raise e
+
+    def get_text_audio_map(self):
+        """获取文本和音频的对应关系"""
+        return self.text_audio_map
+
+    def get_current_text_id(self):
+        """获取当前正在处理的文本ID"""
+        return self.current_text_id
 
     def set_voice(self, voice):
         """Set the voice for TTS"""
