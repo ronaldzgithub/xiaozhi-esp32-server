@@ -81,7 +81,8 @@ class FunctionHandler:
                 )
             func = funcItem.func
             arguments = function_call_data["arguments"]
-            arguments = json.loads(arguments) if arguments else {}
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments) if arguments else {}
             logger.bind(tag=TAG).info(f"调用函数: {function_name}, 参数: {arguments}")
             if (
                 funcItem.type == ToolType.SYSTEM_CTL

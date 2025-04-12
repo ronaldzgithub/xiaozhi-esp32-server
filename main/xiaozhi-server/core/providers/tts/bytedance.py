@@ -2,9 +2,7 @@ import asyncio
 from datetime import datetime
 import json
 import os
-import queue
 import uuid
-import aiofiles
 import websockets
 from websockets.asyncio.client import ClientConnection
 from config.logger import setup_logging
@@ -368,7 +366,7 @@ class TTSProvider(TTSProviderBase):
         """处理单个文本"""
         try:
             start_time = datetime.now()
-            logger.bind(tag=TAG).info(f"Starting _process_text at {start_time} for text_id: {text_info['text_id']}")
+            logger.bind(tag=TAG).debug(f"Starting _process_text at {start_time} for text_id: {text_info['text_id']}")
             
             # 确保连接有效
             if not self.ws or self.ws.state == websockets.State.CLOSED:
@@ -381,7 +379,7 @@ class TTSProvider(TTSProviderBase):
             self.session_id = uuid.uuid4().__str__().replace('-', '')
             await start_session(self.ws, self.voice, self.session_id)
             res = parser_response(await self.ws.recv())
-            logger.bind(tag=TAG).info(f"Session started in {(datetime.now() - session_start_time).total_seconds():.2f}s")
+            logger.bind(tag=TAG).debug(f"Session started in {(datetime.now() - session_start_time).total_seconds():.2f}s")
             
             if res.optional.event != EVENT_SessionStarted:
                 raise RuntimeError(f"Start session failed: {res.optional.__dict__}")
@@ -389,7 +387,7 @@ class TTSProvider(TTSProviderBase):
             # 发送文本
             text_send_time = datetime.now()
             await send_text(self.ws, self.voice, text_info['text'], self.session_id)
-            logger.bind(tag=TAG).info(f"Text sent in {(datetime.now() - text_send_time).total_seconds():.2f}s")
+            logger.bind(tag=TAG).debug(f"Text sent in {(datetime.now() - text_send_time).total_seconds():.2f}s")
             
             # 结束当前会话
             await finish_session(self.ws, self.session_id)
@@ -403,6 +401,10 @@ class TTSProvider(TTSProviderBase):
                     
                     if res.optional.event == EVENT_TTSResponse and res.header.message_type == AUDIO_ONLY_RESPONSE:
                         all_payloads.append(res.payload)
+                        if len(all_payloads) == 25:
+                            self.send_payload(all_payloads, text_info)
+                            all_payloads = []
+                            continue
                     elif res.optional.event in [EVENT_TTSSentenceStart, EVENT_TTSSentenceEnd]:
                         continue
                     else:
@@ -414,48 +416,53 @@ class TTSProvider(TTSProviderBase):
                     self.connection_ready.set()
                     continue
 
-            logger.bind(tag=TAG).info(f"Audio processing took {(datetime.now() - audio_process_start).total_seconds():.2f}s")
-            
-            # 所有音频数据收集完成后，一次性转换为opus格式
-            opus_convert_start = datetime.now()
-            all_opus_data = []
-            if all_payloads:
-                try:
-                    # 合并所有payload
-                    combined_payload = b''.join(all_payloads)
-                    # 将 MP3 数据转换为 PCM 数据
-                    audio = AudioSegment.from_mp3(io.BytesIO(combined_payload))
-                    # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
-                    audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
-                    # 将音频数据转换为 opus 格式
-                    opus_data, _ = self.audio_to_opus_data_directly(audio)
-                    all_opus_data.extend(opus_data)
-                except Exception as e:
-                    logger.bind(tag=TAG).error(f"Error processing combined audio data: {e}")
-            
-            logger.bind(tag=TAG).info(f"Opus conversion took {(datetime.now() - opus_convert_start).total_seconds():.2f}s")
-            
-            # 发送到 audio_play_queue
-            queue_send_start = datetime.now()
-            if self.audio_play_queue is not None and all_opus_data:
-                self.audio_play_queue.put((all_opus_data, text_info['text'], text_info['text_index']))
-                logger.bind(tag=TAG).info(f"Audio sent to play queue in {(datetime.now() - queue_send_start).total_seconds():.2f}s")
-            elif not all_opus_data:
-                logger.bind(tag=TAG).error("No audio data collected")
-            else:
-                logger.bind(tag=TAG).error("audio_play_queue is None, cannot send audio packet")
+            logger.bind(tag=TAG).debug(f"Audio processing took {(datetime.now() - audio_process_start).total_seconds():.2f}s")
+
+            if len(all_payloads) > 0:
+                self.send_payload(all_payloads, text_info)
             
             if res.optional.event != EVENT_SessionFinished:
                 raise RuntimeError(f"Finish session failed: {res.optional.__dict__}")
             
             total_time = (datetime.now() - start_time).total_seconds()
-            logger.bind(tag=TAG).info(f"Total processing time: {total_time:.2f}s for text_id: {text_info['text_id']}")
+            logger.bind(tag=TAG).debug(f"Total processing time: {total_time:.2f}s for text_id: {text_info['text_id']}")
                 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Error processing text: {e}")
             if isinstance(e, websockets.exceptions.ConnectionClosed):
                 self.connection_ready.clear()
 
+    def send_payload(self, all_payloads, text_info):
+        """发送payload"""
+
+        # 所有音频数据收集完成后，一次性转换为opus格式
+        opus_convert_start = datetime.now()
+        all_opus_data = []
+        if all_payloads:
+            try:
+                # 合并所有payload
+                combined_payload = b''.join(all_payloads)
+                # 将 MP3 数据转换为 PCM 数据
+                audio = AudioSegment.from_mp3(io.BytesIO(combined_payload))
+                # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
+                audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+                # 将音频数据转换为 opus 格式
+                opus_data, _ = self.audio_to_opus_data_directly(audio)
+                all_opus_data.extend(opus_data)
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"Error processing combined audio data: {e}")
+        
+        logger.bind(tag=TAG).debug(f"Opus conversion took {(datetime.now() - opus_convert_start).total_seconds():.2f}s")
+        
+        # 发送到 audio_play_queue
+        queue_send_start = datetime.now()
+        if self.audio_play_queue is not None and all_opus_data:
+            self.audio_play_queue.put((all_opus_data, text_info['text'], text_info['text_index']))
+            logger.bind(tag=TAG).debug(f"Audio sent to play queue in {(datetime.now() - queue_send_start).total_seconds():.2f}s")
+        elif not all_opus_data:
+            logger.bind(tag=TAG).error("No audio data collected")
+        else:
+            logger.bind(tag=TAG).error("audio_play_queue is None, cannot send audio packet")
     async def _session_manager(self):
         """管理会话的进程"""
         while not self.stop_event.is_set():
@@ -465,10 +472,6 @@ class TTSProvider(TTSProviderBase):
                 
                 # 获取待处理文本
                 text_info = await self.pending_texts.get()
-                queue_wait_time = (datetime.now() - text_info.get('put_time', datetime.now())).total_seconds()
-                
-                if queue_wait_time > 0.5:
-                    logger.bind(tag=TAG).warning(f"Queue wait time: {text_info['text']} {queue_wait_time:.2f}s")
                 
                 # 处理文本
                 await self._process_text(text_info)
@@ -506,7 +509,17 @@ class TTSProvider(TTSProviderBase):
                 'put_time': datetime.now()  # 记录放入队列的时间
             }
             
-            logger.bind(tag=TAG).info(f"Before put: {text} {datetime.now()}")
+            logger.bind(tag=TAG).debug(f"Before put: {text} {datetime.now()}")
+            
+            # 如果text_index为1，直接处理
+            if text_index == 1:
+                # 确保在同一个event loop中执行
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    await self._process_text(text_info)
+                else:
+                    loop.run_until_complete(self._process_text(text_info))
+                return True
             
             # 检查队列是否已满
             if self.pending_texts.full():
@@ -517,7 +530,7 @@ class TTSProvider(TTSProviderBase):
                 # 直接放入队列
                 await self.pending_texts.put(text_info)
 
-            logger.bind(tag=TAG).info(f"After put text at: {datetime.now()} - Text: {text}")
+            logger.bind(tag=TAG).debug(f"After put text at: {datetime.now()} - Text: {text}")
             return True
         except asyncio.TimeoutError:
             logger.bind(tag=TAG).error("Timeout while waiting to add text to queue")

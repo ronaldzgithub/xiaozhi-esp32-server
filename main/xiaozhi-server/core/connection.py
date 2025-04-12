@@ -535,15 +535,14 @@ class ConnectionHandler:
             content_arguments = ""
 
             # 使用正则表达式优化标点查找
-            punctuations_pattern = re.compile(r'[。？！；：]')
+            punctuations_pattern = re.compile(r'[,，；。？！；：、.;n!~～?]')
 
             """# 启动TTS预加载任务
             if self.tts_preload_task is None:
                 self.tts_preload_task = asyncio.run_coroutine_threadsafe(self._tts_preload_worker(), self.loop)"""
-
+            
             for response in llm_responses:
                 content, tools_call = response
-                
                 if content is not None and len(content) > 0:
                     if not tool_call_flag:
                         response_message.append(content)
@@ -567,24 +566,20 @@ class ConnectionHandler:
                             
                             if segment_text:
                                 text_index += 1
-                                # 开始TTS处理计时
-                                self.performance_monitor.start_tts()
                                 
-                                # 将文本放入预加载队列
-                                try:
-                                    self.tts_preload_queue.put_nowait(segment_text)
-                                except asyncio.QueueFull:
-                                    pass
-                                
-                                # 并行处理TTS和文本记录
-                                #tts_task = asyncio.run_coroutine_threadsafe(self.tts_service.process(segment_text), self.loop)
-                                """tts_task = self.loop.create_task(
-                                    self.tts_service.process(segment_text)
-                                )"""
+                                # 如果还没有说出第一句话，则说出前4个字或第一个标点符号之前的文本,这是为了加速响应
+                                if self.tts_first_text_index == -1:
+                                    if last_punct_pos < 4:
+                                        first_text = segment_text[:last_punct_pos + 1]
+                                    else:
+                                        first_text = segment_text[:4]
+                                    self.speak_and_play(first_text, text_index)
+                                    self.tts_first_text_index = text_index
+                                    segment_text = segment_text[len(first_text):]
+
                                 self.recode_first_last_text(segment_text, text_index)
                                 self.speak_and_play(segment_text, text_index)
-                               
-                                self.performance_monitor.end_tts()
+
                                 processed_chars += len(segment_text_raw)
                                 
                 if tools_call is not None:
@@ -817,7 +812,9 @@ class ConnectionHandler:
         # 使用 ByteDance TTS provider 生成语音
         try:
             self.logger.bind(tag=TAG).info(f"TTS 开始转换: {text} {datetime.now()}")
-            tts_file = asyncio.run(self.tts.text_to_speak(text, text_index))
+            # 在主线程中运行
+            tts_file = asyncio.run_coroutine_threadsafe(self.tts.text_to_speak(text, text_index), self.loop).result()
+                
             if tts_file is None:
                 self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
                 return None, text, text_index

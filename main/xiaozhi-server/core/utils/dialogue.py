@@ -70,8 +70,11 @@ class Dialogue:
         if system_message:
             enhanced_system_prompt = (
                 f"{system_message.content}\n\n"
-                f"相关记忆：\n{memory_str}"
+                f"回答问题时候，一定注意！注意！注意！注意！注意！第一个标点符号不要超过第四个字符！也就是说用1到4个字来开始回答问题！\n\n"
+                f"相关记忆：\n{memory_str}\n\n"               
             )
+
+            enhanced_system_prompt = enhanced_system_prompt.replace("'", "\"")
             dialogue.append({"role": "system", "content": enhanced_system_prompt})
 
         # 添加用户和助手的对话
