@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 import json
 import os
+import queue
 import uuid
 import aiofiles
 import websockets
@@ -292,7 +293,9 @@ class TTSProvider(TTSProviderBase):
         self.audio_play_queue = None  # 将由 connection.py 设置
         self.max_queue_size = config.get("max_queue_size", 100)  # 添加队列大小限制
         self.pending_texts = asyncio.Queue(maxsize=self.max_queue_size)  # 设置队列最大大小
-        # Initialize WebSocket connection asynchronously
+        self.connection_ready = asyncio.Event()  # 用于标记连接是否就绪
+        # 初始化 WebSocket 连接
+        asyncio.create_task(self._init_connection())
         asyncio.create_task(self._session_manager())
 
     def set_tts_queue(self, tts_queue):
@@ -309,6 +312,19 @@ class TTSProvider(TTSProviderBase):
         """Generate a unique filename for the TTS output"""
         filename = f"bytedance_tts_{uuid.uuid4()}.{self.audio_format}"
         return os.path.join(self.output_file, filename)
+
+    async def _init_connection(self):
+        """初始化 WebSocket 连接"""
+        while not self.stop_event.is_set():
+            try:
+                if not self.ws or self.ws.state == websockets.State.CLOSED:
+                    logger.bind(tag=TAG).info("Initializing WebSocket connection...")
+                    await self._init_websocket()
+                    self.connection_ready.set()
+                await asyncio.sleep(1)  # 定期检查连接状态
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"Error in connection initialization: {e}")
+                await asyncio.sleep(1)
 
     async def _init_websocket(self):
         """初始化 WebSocket 连接"""
@@ -352,7 +368,13 @@ class TTSProvider(TTSProviderBase):
         """处理单个文本"""
         try:
             start_time = datetime.now()
-            logger.bind(tag=TAG).info(f"Starting _process_text at {start_time} for: {text_info['text']}")
+            logger.bind(tag=TAG).info(f"Starting _process_text at {start_time} for text_id: {text_info['text_id']}")
+            
+            # 确保连接有效
+            if not self.ws or self.ws.state == websockets.State.CLOSED:
+                self.connection_ready.clear()
+                await self._init_websocket()
+                self.connection_ready.set()
             
             # Start session
             session_start_time = datetime.now()
@@ -387,7 +409,9 @@ class TTSProvider(TTSProviderBase):
                         break
                 except websockets.exceptions.ConnectionClosed:
                     logger.bind(tag=TAG).error("WebSocket connection closed, attempting to reconnect...")
+                    self.connection_ready.clear()
                     await self._init_websocket()
+                    self.connection_ready.set()
                     continue
 
             logger.bind(tag=TAG).info(f"Audio processing took {(datetime.now() - audio_process_start).total_seconds():.2f}s")
@@ -429,39 +453,31 @@ class TTSProvider(TTSProviderBase):
                 
         except Exception as e:
             logger.bind(tag=TAG).error(f"Error processing text: {e}")
+            if isinstance(e, websockets.exceptions.ConnectionClosed):
+                self.connection_ready.clear()
 
     async def _session_manager(self):
         """管理会话的进程"""
-        # 初始化 WebSocket 连接
-        if not self.ws:
-            await self._init_websocket()
-        
         while not self.stop_event.is_set():
             try:
-                # 等待新的文本，设置超时时间
-                try:
-                    queue_wait_start = datetime.now()
-                    text_info = await asyncio.wait_for(self.pending_texts.get(), timeout=115.0)
-                    queue_wait_time = (datetime.now() - queue_wait_start).total_seconds()
-                    logger.bind(tag=TAG).info(f"Queue wait time: {text_info['text']} {queue_wait_time:.2f}s")
-                    
-                    if queue_wait_time > 1.0:  # 如果等待时间超过1秒，记录警告
-                        logger.bind(tag=TAG).warning(f"Long queue wait time detected: {queue_wait_time:.2f}s")
-                    
-                    logger.bind(tag=TAG).info(f"Processing text: {text_info['text']} {datetime.now()}")
-                    await self._process_text(text_info)
-                    self.pending_texts.task_done()
-                    logger.bind(tag=TAG).info(f"Processing text Done: {text_info['text']} {datetime.now()}")
-
-                except asyncio.TimeoutError:
-                    # 如果超时，检查连接状态
-                    if not self.ws or self.ws.state == websockets.State.CLOSED:
-                        logger.bind(tag=TAG).info("WebSocket connection lost, attempting to reconnect...")
-                        await self._init_websocket()
-                    continue
+                # 等待连接就绪
+                await self.connection_ready.wait()
+                
+                # 获取待处理文本
+                text_info = await self.pending_texts.get()
+                queue_wait_time = (datetime.now() - text_info.get('put_time', datetime.now())).total_seconds()
+                
+                if queue_wait_time > 0.5:
+                    logger.bind(tag=TAG).warning(f"Queue wait time: {text_info['text']} {queue_wait_time:.2f}s")
+                
+                # 处理文本
+                await self._process_text(text_info)
+                self.pending_texts.task_done()
                 
             except Exception as e:
                 logger.bind(tag=TAG).error(f"Error in session manager: {e}")
+                if isinstance(e, websockets.exceptions.ConnectionClosed):
+                    self.connection_ready.clear()
                 continue
 
     async def text_to_speak(self, text, output_file=None):
@@ -484,11 +500,12 @@ class TTSProvider(TTSProviderBase):
             text_info = {
                 'text_id': text_id,
                 'text': text,
-                'audio_file': output_file
+                'audio_file': output_file,
+                'put_time': datetime.now()  # 记录放入队列的时间
             }
             
-            
             logger.bind(tag=TAG).info(f"Before put: {text} {datetime.now()}")
+            
             # 检查队列是否已满
             if self.pending_texts.full():
                 logger.bind(tag=TAG).warning("TTS queue is full, waiting for space...")
@@ -498,9 +515,7 @@ class TTSProvider(TTSProviderBase):
                 # 直接放入队列
                 await self.pending_texts.put(text_info)
 
-            #await self._process_text(text_info)
-            # 记录时间和文本
-            logger.bind(tag=TAG).info(f"After put  text at: {datetime.now()} - Text: {text}")
+            logger.bind(tag=TAG).info(f"After put text at: {datetime.now()} - Text: {text}")
             return True
         except asyncio.TimeoutError:
             logger.bind(tag=TAG).error("Timeout while waiting to add text to queue")

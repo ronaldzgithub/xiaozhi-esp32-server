@@ -210,7 +210,7 @@ class MemoryProvider(MemoryProviderBase):
             if speaker_id:
                 # 获取特定说话人的记忆
                 if speaker_id in self.user_memories:
-                    memories = self.user_memories[speaker_id].get("memories", [])
+                    memories = self.user_memories[speaker_id].get("memories", [])[-5:]
                     for memory in memories:
                         if 'metadata' in memory:
                             del memory['metadata']
@@ -220,7 +220,7 @@ class MemoryProvider(MemoryProviderBase):
                     short_memory = self.user_memories[speaker_id].get("short_memory", [])
 
                     mem = '这是你和用户的的通话记录【注意这里都是用户说过的话，你说过的话不在这里】：'+';'.join([str(item['messages']) for item in memories]) + '\n'
-                    if short_memory:
+                    if short_memory and False:
                         mem += '\n【重要！！！】用户的一些信息，以及用户的一些记忆：'+''.join([str(item) for item in short_memory])
                     return mem
                 

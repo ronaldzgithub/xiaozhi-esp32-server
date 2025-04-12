@@ -790,6 +790,7 @@ class ConnectionHandler:
                     self.loop
                 )
                 self.logger.bind(tag=TAG).error(f"tts_priority priority_thread: {text} {e}")
+            asyncio.sleep(0.01)
 
     def _audio_play_priority_thread(self):
         while not self.stop_event.is_set():
@@ -806,6 +807,7 @@ class ConnectionHandler:
                 future.result()
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"audio_play_priority priority_thread: {text} {e}")
+            asyncio.sleep(0.01)
 
     def speak_and_play(self, text, text_index=0):
         if text is None or len(text) <= 0:
@@ -963,6 +965,8 @@ class ConnectionHandler:
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"主动对话检查任务出错: {e}")
                 await asyncio.sleep(self.proactive.config.get("silence_threshold", 60))  # 出错后等待配置的时间间隔再试
+
+            asyncio.sleep(1)
 
     async def handle_audio_message(self, audio, text, speaker_id)->bool:
         """
