@@ -498,7 +498,12 @@ class ConnectionHandler:
             self.proactive.update_last_interaction(current_time)
 
         if not tool_call:
-            self.dialogue.put(Message(role="user", content=query))
+            self.dialogue.put(Message(role="user", content=query,  metadata={
+                    "speaker_id": speaker_id,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                    "is_admin": self.private_config.is_in_admin_mode() if self.private_config else False
+                }))
 
         # 并行获取记忆
         memory_future = asyncio.run_coroutine_threadsafe(self.memory.query_memory(query), self.loop)

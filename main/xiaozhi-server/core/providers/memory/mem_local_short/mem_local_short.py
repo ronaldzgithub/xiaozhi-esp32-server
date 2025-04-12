@@ -378,7 +378,7 @@ class MemoryProvider(MemoryProviderBase):
             return None
         
         msgStr = ""
-        for msg in msgs:
+        """for msg in msgs:
             if isinstance(msg, dict):
                 if msg['role'] == "user":
                     content = msg['content']
@@ -394,65 +394,78 @@ class MemoryProvider(MemoryProviderBase):
                 content = msg.content
                 if isinstance(content, list):
                     content = ' '.join(content)
-                msgStr += f"{msg.role}: {content}\n"
+                msgStr += f"{msg.role}: {content}\n"""
 
         # 获取当前说话人的短期记忆
+        
         speaker_id = None
+        speaker_msgs = {}
         for msg in msgs:
+            if msg.role != "user":
+                continue
+
             if isinstance(msg, dict):
                 if msg.get('metadata', {}).get('speaker_id'):
                     speaker_id = msg['metadata']['speaker_id']
-                    break
+                    if speaker_id not in speaker_msgs:
+                        speaker_msgs[speaker_id] = []
+                    speaker_msgs[speaker_id].append(msg)
             elif hasattr(msg, 'metadata') and msg.metadata.get('speaker_id'):
                 speaker_id = msg.metadata['speaker_id']
-                break
+                if speaker_id not in speaker_msgs:
+                    speaker_msgs[speaker_id] = []
+                speaker_msgs[speaker_id].append(msg)
 
-        if speaker_id:
+        for speaker_id, msgs in speaker_msgs.items():
             if speaker_id not in self.user_memories:
                 self.user_memories[speaker_id] = {
                     "created_at": time.time(),
-                    "last_seen": time.time(),
-                    "interaction_count": 0,
+                    "last_seen": time.time() if not msgs[-1].metadata else msgs[-1].metadata.get('timestamp', time.time()),
+                    "interaction_count": 1,
                     "total_duration": 0,
                     "memories": [],
                     "short_memory": []
                 }
-            
+            else:
+                self.user_memories[speaker_id]["last_seen"] =time.time() if not msgs[-1].metadata else msgs[-1].metadata.get('timestamp', time.time()),
+                self.user_memories[speaker_id]["interaction_count"] += 1
+        
             short_memory = self.user_memories[speaker_id].get("short_memory", [])
             if short_memory:
                 msgStr += "历史记忆：\n"
                 msgStr += "\n".join(short_memory)
-        
-        #当前时间
-        time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        msgStr += f"当前时间：{time_str}"
+            if len(msgs) > 0:
+                msgStr += f"用户最近的一些对话：\n"
+                msgStr += "\n".join([str(item.content) for item in msgs])
 
-        # 构建正确的消息格式
-        messages = [
-            {"role": "system", "content": short_term_memory_prompt},
-            {"role": "user", "content": msgStr}
-        ]
-        
-        try:
-            logger.bind(tag=TAG).info(f"Preparing to call LLM response with messages: {messages}")
             
-            result = [part async for part in self.llm.response(None, messages)]
-            logger.bind(tag=TAG).info(f"LLM response received: {result}")
+            #当前时间
+            time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            msgStr += f"当前时间：{time_str}"
+
+            # 构建正确的消息格式
+            messages = [
+                {"role": "system", "content": short_term_memory_prompt},
+                {"role": "user", "content": msgStr}
+            ]
             
-            json_str = extract_json_data(" ".join(result))
             try:
-                json_data = json.loads(json_str)  # 检查json格式是否正确
-                # 更新当前说话人的短期记忆
-                if speaker_id:
+                logger.bind(tag=TAG).info(f"Preparing to call LLM response with messages: {messages}")
+                
+                result = [part async for part in self.llm.response(None, messages)]
+                logger.bind(tag=TAG).info(f"LLM response received: {result}")
+                
+                json_str = extract_json_data("".join(result))
+                try:
+                    json_data = json.loads(json_str)  # 检查json格式是否正确
+                    # 更新当前说话人的短期记忆
                     self.user_memories[speaker_id]["short_memory"] = [json_str]
                     logger.bind(tag=TAG).info(f"Successfully parsed and saved JSON memory for speaker: {speaker_id}")
-            except Exception as e:
-                logger.bind(tag=TAG).error(f"Error parsing JSON: {e}")
-                if speaker_id:
+                except Exception as e:
+                    logger.bind(tag=TAG).error(f"Error parsing JSON: {e}")
                     self.user_memories[speaker_id]["short_memory"] = [json_str]
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"LLM调用失败: {e}")
-            if speaker_id:
+            except Exception as e:
+                logger.bind(tag=TAG).error(f"LLM调用失败: {e}")
                 self.user_memories[speaker_id]["short_memory"] = [""]
         
         self.save_memory_to_file()

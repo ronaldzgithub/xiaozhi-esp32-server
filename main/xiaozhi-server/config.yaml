@@ -66,13 +66,17 @@ CMD_exit:
   - "退出"
   - "关闭"
   - "退下"
+  - "退下吧"
   - "关机"
   - "闭嘴"
   - "安静"
   - "睡觉"
   - "睡觉了"
-
-# 具体处理时选择的模块(The module selected for specific processing)
+  - "睡觉吧"
+  - "再见"
+  - "拜拜"
+  - "拜拜了"
+# 具体处 理时选择的模块(The module selected for specific processing)
 selected_module:
   # 语音活动检测模块，默认使用SileroVAD模型
   VAD: SileroVAD
