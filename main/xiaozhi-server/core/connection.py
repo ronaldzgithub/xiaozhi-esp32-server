@@ -817,7 +817,7 @@ class ConnectionHandler:
         # 使用 ByteDance TTS provider 生成语音
         try:
             self.logger.bind(tag=TAG).info(f"TTS 开始转换: {text} {datetime.now()}")
-            tts_file = asyncio.run(self.tts.text_to_speak(text))
+            tts_file = asyncio.run(self.tts.text_to_speak(text, text_index))
             if tts_file is None:
                 self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
                 return None, text, text_index

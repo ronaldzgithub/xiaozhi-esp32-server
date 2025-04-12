@@ -438,7 +438,7 @@ class TTSProvider(TTSProviderBase):
             # 发送到 audio_play_queue
             queue_send_start = datetime.now()
             if self.audio_play_queue is not None and all_opus_data:
-                self.audio_play_queue.put((all_opus_data, text_info['text'], text_info['text_id']))
+                self.audio_play_queue.put((all_opus_data, text_info['text'], text_info['text_index']))
                 logger.bind(tag=TAG).info(f"Audio sent to play queue in {(datetime.now() - queue_send_start).total_seconds():.2f}s")
             elif not all_opus_data:
                 logger.bind(tag=TAG).error("No audio data collected")
@@ -480,7 +480,7 @@ class TTSProvider(TTSProviderBase):
                     self.connection_ready.clear()
                 continue
 
-    async def text_to_speak(self, text, output_file=None):
+    async def text_to_speak(self, text, text_index = 0, output_file=None):
         """Convert text to speech using ByteDance TTS API"""
         try:
             # 如果 output_file 为 None，生成一个新的文件名
@@ -492,6 +492,7 @@ class TTSProvider(TTSProviderBase):
             self.current_text_id = text_id
             self.text_audio_map[text_id] = {
                 'text': text,
+                'text_index': text_index,
                 'audio_file': output_file,
                 'status': 'processing'
             }
@@ -500,6 +501,7 @@ class TTSProvider(TTSProviderBase):
             text_info = {
                 'text_id': text_id,
                 'text': text,
+                'text_index': text_index,
                 'audio_file': output_file,
                 'put_time': datetime.now()  # 记录放入队列的时间
             }
