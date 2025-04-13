@@ -18,6 +18,8 @@ class PrivateConfig:
         self.logger = setup_logging()
         self.private_config = {}
         self.auth_code_gen = auth_code_gen
+        self.is_admin_mode = False    # 管理员模式状态
+        self.waiting_for_admin_voiceprint = False  # 是否正在等待管理员声纹
         self.lock_manager = FileLockManager()
 
     async def load_or_create(self):
@@ -59,7 +61,8 @@ class PrivateConfig:
                         'VAD': {
                             selected_vad: deepcopy(self.default_config['VAD'][selected_vad])
                         },
-                        'auth_code': auth_code  # 添加认证码字段
+                        'auth_code': auth_code,  # 添加认证码字段
+                        'admin_speaker_id': self.admin_speaker_id,  # 添加管理员speaker_id字段
                     }
                     
                     all_configs[self.device_id] = device_config
@@ -131,6 +134,32 @@ class PrivateConfig:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Error updating config: {e}")
             return False
+    
+    def is_admin_voiceprint_set(self):
+        """检查是否已设置管理员声纹"""
+        return self.admin_speaker_id is not None
+
+    async def set_admin_speaker_id(self, speaker_id):
+        """设置管理员speaker_id"""
+        self.private_config['admin_speaker_id'] = speaker_id
+        await self.update_last_chat_time()
+
+    def verify_admin_voiceprint(self, speaker_id):
+        """验证声纹是否为管理员声纹"""
+        return self.admin_speaker_id == speaker_id
+
+    def enter_admin_mode(self):
+        """进入管理员模式"""
+        self.is_admin_mode = True
+
+    def exit_admin_mode(self):
+        """退出管理员模式"""
+        self.is_admin_mode = False
+
+    def is_in_admin_mode(self):
+        """检查是否在管理员模式"""
+        return self.is_admin_mode
+
 
     async def delete_config(self) -> bool:
         """删除设备配置
@@ -238,4 +267,8 @@ class PrivateConfig:
 
     def get_owner(self) -> Optional[str]:
         """获取设备当前所有者"""
-        return self.private_config.get('owner')
+        return self.private_config.get('admin_speaker_id')
+    
+    async def save_private_config(self):
+        """保存私有配置"""
+        await self.update_last_chat_time()

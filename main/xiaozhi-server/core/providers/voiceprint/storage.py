@@ -12,8 +12,10 @@ class VoiceprintStorage:
         self.storage_dir = storage_dir
         self.voiceprints_dir = os.path.join(storage_dir, "voiceprints")
         self.stats_file = os.path.join(storage_dir, "speaker_stats.json")
+        self.speaker_info_file = os.path.join(storage_dir, "speaker_info.json")
         self._ensure_dirs()
         self._load_stats()
+        self._load_speaker_info()
 
     def _ensure_dirs(self):
         """确保必要的目录存在"""
@@ -47,7 +49,27 @@ class VoiceprintStorage:
         """获取说话人的存储目录"""
         return os.path.join(self.voiceprints_dir, speaker_id)
 
-    def save_voiceprint(self, speaker_id, audio_file):
+    def _load_speaker_info(self):
+        """加载说话人信息"""
+        try:
+            if os.path.exists(self.speaker_info_file):
+                with open(self.speaker_info_file, 'r', encoding='utf-8') as f:
+                    self.speaker_info = json.load(f)
+            else:
+                self.speaker_info = {}
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"加载说话人信息失败: {e}")
+            self.speaker_info = {}
+
+    def _save_speaker_info(self):
+        """保存说话人信息"""
+        try:
+            with open(self.speaker_info_file, 'w', encoding='utf-8') as f:
+                json.dump(self.speaker_info, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"保存说话人信息失败: {e}")
+
+    def save_voiceprint(self, speaker_id, audio_file, device_id=None):
         """保存声纹文件"""
         try:
             speaker_dir = self._get_speaker_dir(speaker_id)
@@ -70,6 +92,18 @@ class VoiceprintStorage:
                 }
             self.stats[speaker_id]["voiceprint_count"] += 1
             self._save_stats()
+
+            # 更新说话人信息
+            if speaker_id not in self.speaker_info:
+                self.speaker_info[speaker_id] = {
+                    "devices": [],
+                    "first_seen": timestamp,
+                    "last_seen": timestamp
+                }
+            if device_id and device_id not in self.speaker_info[speaker_id]["devices"]:
+                self.speaker_info[speaker_id]["devices"].append(device_id)
+            self.speaker_info[speaker_id]["last_seen"] = timestamp
+            self._save_speaker_info()
             
             return target_path
             
@@ -130,6 +164,18 @@ class VoiceprintStorage:
         except Exception as e:
             logger.bind(tag=TAG).error(f"更新统计信息失败: {e}")
 
+    def get_speaker_devices(self, speaker_id):
+        """获取说话人关联的设备列表"""
+        if speaker_id in self.speaker_info:
+            return self.speaker_info[speaker_id].get("devices", [])
+        return []
+
+    def get_speaker_info(self, speaker_id):
+        """获取说话人详细信息"""
+        if speaker_id in self.speaker_info:
+            return self.speaker_info[speaker_id]
+        return None
+
     def delete_speaker(self, speaker_id):
         """删除说话人及其所有声纹文件"""
         try:
@@ -140,6 +186,10 @@ class VoiceprintStorage:
             if speaker_id in self.stats:
                 del self.stats[speaker_id]
                 self._save_stats()
+            
+            if speaker_id in self.speaker_info:
+                del self.speaker_info[speaker_id]
+                self._save_speaker_info()
             
             return True
             

@@ -2,7 +2,7 @@
 # 在开发中，在项目根目录创建data目录，将【config.yaml】复制一份，改成【.config.yaml】，放进data目录中
 # 系统会优先读取【data/.config.yaml】文件的配置。
 # 这样做，可以避免在提交代码的时候，错误地提交密钥信息，保护您的密钥安全。
-
+use_private_config: true
 # 服务器基础配置(Basic server configuration)
 server:
   # 服务器监听地址和端口(Server listening address and port)

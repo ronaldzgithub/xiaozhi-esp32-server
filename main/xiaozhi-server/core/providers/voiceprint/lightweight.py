@@ -139,7 +139,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
             logger.bind(tag=TAG).error(f"声纹比较失败: {e}")
             return 0.0, False
 
-    async def identify_speaker(self, audio_data):
+    async def identify_speaker(self, audio_data, device_id):
         """识别说话人"""
         try:
             # 保存当前音频为临时文件
@@ -193,7 +193,7 @@ class VoiceprintProvider(VoiceprintProviderBase):
             self.speaker_count += 1
             
             # 保存新的声纹文件
-            current_path = self.storage.save_voiceprint(new_speaker_id, current_audio_file)
+            current_path = self.storage.save_voiceprint(new_speaker_id, current_audio_file, device_id)
             self.voiceprint_cache[new_speaker_id] = [current_path]
             
             logger.bind(tag=TAG).info(f"新说话人: {new_speaker_id}")

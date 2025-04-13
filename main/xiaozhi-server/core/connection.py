@@ -77,7 +77,7 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"主动对话模块初始化失败: {e}")
             self.proactive = None
 
-        """# 添加声纹识别模块
+        # 添加声纹识别模块
         voiceprint_cls_name = self.config["selected_module"].get("Voiceprint", "lightweight")
         has_voiceprint_cfg = self.config.get("Voiceprint") and voiceprint_cls_name in self.config["Voiceprint"]
         voiceprint_cfg = self.config["Voiceprint"][voiceprint_cls_name] if has_voiceprint_cfg else {}
@@ -87,7 +87,7 @@ class ConnectionHandler:
             self.voiceprint = VoiceprintProvider(voiceprint_cfg)
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"声纹识别模块初始化失败: {e}")
-            self.voiceprint = None"""
+            self.voiceprint = None
 
         self.websocket = None
         self.headers = None
@@ -219,6 +219,12 @@ class ConnectionHandler:
 
                     if self.is_device_verified:
                         await self.private_config.update_last_chat_time()
+                    else:
+                        if self.voiceprint:
+                            # 对于新设备，等待第一个声纹并设置为管理员
+                            self.logger.bind(tag=TAG).info("等待第一个声纹作为管理员...")
+                            # 设置标志，表示需要等待管理员声纹
+                            self.private_config.waiting_for_admin_voiceprint = True
 
                     llm, tts = self.private_config.create_private_instances()
                     if all([llm, tts]):
@@ -366,8 +372,7 @@ class ConnectionHandler:
                 # 发送验证码语音提示
                 text = f"请在后台输入验证码：{' '.join(auth_code)}"
                 self.recode_first_last_text(text)
-                future = self.executor.submit(self.speak_and_play, text)
-                self.tts_queue.put(future)
+                self.send_full_audio_message(text)
             return False
         return True
 
@@ -482,11 +487,11 @@ class ConnectionHandler:
         # 开始性能监控
         self.performance_monitor.start_request()
         
-        if self.isNeedAuth():
+        """if self.isNeedAuth():
             self.llm_finish_task = True
             future = asyncio.run_coroutine_threadsafe(self._check_and_broadcast_auth_code(), self.loop)
             future.result()
-            return True
+            return True"""
 
        
 
@@ -947,9 +952,9 @@ class ConnectionHandler:
 
     async def send_full_audio_message(self, content):
         # 检查系统是否正在说话
-        if not self.asr_server_receive:
-            self.logger.bind(tag=TAG).debug(f"系统正在说话，skip sending content {content}")
-            return False
+        """if not self.asr_server_receive:
+            self.logger.bind(tag=TAG).debug(f"系统正在说话，等待中... {content}")
+            return"""
         
         """开始主动对话"""
         # 添加到对话历史并开始对话
@@ -979,50 +984,35 @@ class ConnectionHandler:
             asyncio.sleep(5)
 
     async def handle_audio_message(self, audio, text, speaker_id)->bool:
-        """
-        处理音频消息，返回如果为False，则会话不用继续了。如果True，则会话继续。
-        """
         """处理音频消息"""
         try:
-            """
-            # 检查是否是新用户
-            if speaker_id not in self.memory.user_memories:
-                response = "你好呀， 能介绍下你自己吗"#，年龄，职业，兴趣这些"
-                await self.send_text_response(response)
-                return False
-            """
+            # 如果正在等待管理员声纹，则处理声纹识别
+            if hasattr(self.private_config, 'waiting_for_admin_voiceprint') and self.private_config.waiting_for_admin_voiceprint:
+                if self.voiceprint:
+                    try:
+                        # 识别说话人
+                        speaker_id = await self.voiceprint.identify_speaker(audio, self.headers.get('device_id'))
+                        if speaker_id:
+                            # 设置为管理员speaker_id
+                            await self.private_config.set_admin_speaker_id(speaker_id)
+                            self.private_config.waiting_for_admin_voiceprint = False
+                            self.logger.bind(tag=TAG).info(f"已设置管理员speaker_id: {speaker_id}")
+                            
+                            # 发送提示消息
+                            await self.send_full_audio_message("已设置您为管理员，您的声纹已被记录。")
+                    except Exception as e:
+                        self.logger.bind(tag=TAG).error(f"处理管理员声纹失败: {e}")
             
-            """# 处理管理员声纹设置和验证
-            if self.private_config:
-                if not self.private_config.is_admin_voiceprint_set():
-                    # 如果是第一次连接，请求设置管理员声纹
-                    if text.lower() in ["好的", "可以", "确认"]:
-                        # 提取声纹特征
-                        voiceprint = await self.voiceprint.extract_voiceprint(audio)
-                        if voiceprint is not None:
-                            self.private_config.set_admin_voiceprint(voiceprint)
-                            response = "管理员声纹已设置完成。从现在开始，只有您的声音才能进行管理员操作。"
-                            await self.send_text_response(response)
-                            return False
-                    else:
-                        response = "您是这个设备的第一位使用者，您将被设置为系统管理员。请说'好的'来确认。"
-                        await self.send_text_response(response)
-                        return False
-                else:
-                    # 验证是否为管理员声纹
-                    voiceprint = await self.voiceprint.extract_voiceprint(audio)
-                    if voiceprint is not None and self.private_config.verify_admin_voiceprint(voiceprint):
-                        self.private_config.enter_admin_mode()
-                        self.logger.bind(tag=TAG).info("进入管理员模式")
-                        
-            self.logger.bind(tag=TAG).info(f"管理员声纹设置和验证")"""
+            # 处理音频消息
+            if not self.asr_server_receive:
+                self.logger.bind(tag=TAG).debug("系统正在说话，skip")
+                return False
 
-            return await self.handle_text_message(text)
-
+            
+            return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理音频消息失败: {e}")
-        
-        return True
+            return False
     
     async def handle_text_message(self, text):
         """处理文本消息"""
@@ -1109,7 +1099,7 @@ class ConnectionHandler:
             # 4. 更新私有配置中的当前角色
             if self.private_config:
                 self.private_config.private_config["current_role"] = role_name
-                self.private_config.save()
+                #self.private_config.save_private_config()
             
             # 5. 清空当前对话历史
             self.dialogue = Dialogue()
