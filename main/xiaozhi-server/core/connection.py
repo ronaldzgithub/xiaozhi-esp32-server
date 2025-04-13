@@ -574,13 +574,14 @@ class ConnectionHandler:
                                 
                                 # 如果还没有说出第一句话，则说出前4个字或第一个标点符号之前的文本,这是为了加速响应
                                 if self.tts_first_text_index == -1:
-                                    if last_punct_pos < 4:
+                                    if last_punct_pos < 10:
                                         first_text = segment_text[:last_punct_pos + 1]
                                     else:
-                                        first_text = segment_text[:4]
+                                        first_text = segment_text[:10]
                                     self.speak_and_play(first_text, text_index)
                                     self.tts_first_text_index = text_index
                                     segment_text = segment_text[len(first_text):]
+                                    text_index += 1
 
                                 self.recode_first_last_text(segment_text, text_index)
                                 self.speak_and_play(segment_text, text_index)

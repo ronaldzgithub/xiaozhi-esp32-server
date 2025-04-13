@@ -378,24 +378,7 @@ class MemoryProvider(MemoryProviderBase):
             return None
         
         msgStr = ""
-        """for msg in msgs:
-            if isinstance(msg, dict):
-                if msg['role'] == "user":
-                    content = msg['content']
-                    if isinstance(content, list):
-                        content = ' '.join(content)
-                    msgStr += f"User: {content}\n"
-                elif msg['role'] == "assistant":
-                    content = msg['content']
-                    if isinstance(content, list):
-                        content = ' '.join(content)
-                    msgStr += f"Assistant: {content}\n"
-            else:
-                content = msg.content
-                if isinstance(content, list):
-                    content = ' '.join(content)
-                msgStr += f"{msg.role}: {content}\n"""
-
+        
         # 获取当前说话人的短期记忆
         
         speaker_id = None
@@ -427,7 +410,7 @@ class MemoryProvider(MemoryProviderBase):
                     "short_memory": []
                 }
             else:
-                self.user_memories[speaker_id]["last_seen"] =time.time() if not msgs[-1].metadata else msgs[-1].metadata.get('timestamp', time.time()),
+                self.user_memories[speaker_id]["last_seen"] =time.time() if not msgs[-1].metadata else msgs[-1].metadata.get('timestamp', time.time())
                 self.user_memories[speaker_id]["interaction_count"] += 1
         
             short_memory = self.user_memories[speaker_id].get("short_memory", [])
