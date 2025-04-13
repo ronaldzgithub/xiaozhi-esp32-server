@@ -8,12 +8,11 @@ class ProactiveDialogueManagerBase(ABC):
     def __init__(self, config):
         self.config = config
         self.last_interaction_time = 0
-        self.silence_threshold = config.get("silence_threshold", 300)  # 默认5分钟
+        self.silence_threshold = config.get("silence_threshold", 100)  # 默认5分钟
         self.min_interaction_count = config.get("min_interaction_count", 3)  # 最少交互次数
         self.interaction_count = 0
         self.user_interests = {}
         self.last_proactive_time = 0
-        self.proactive_cooldown = config.get("proactive_cooldown", 600)  # 主动对话冷却时间(秒)
 
     @abstractmethod
     async def should_initiate_dialogue(self, current_time, conn):

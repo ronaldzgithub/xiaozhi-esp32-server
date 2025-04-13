@@ -168,11 +168,10 @@ class MemoryProvider(MemoryProviderBase):
         """添加记忆"""
         try:
             # 获取当前时间戳
-            timestamp = time.time()
             
             # 准备记忆数据
             memory_data = {
-                "timestamp": timestamp,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())),
                 "messages": messages,
                 "metadata": metadata
             }
@@ -181,15 +180,15 @@ class MemoryProvider(MemoryProviderBase):
                 # 如果是特定说话人，添加到用户记忆
                 if speaker_id not in self.user_memories:
                     self.user_memories[speaker_id] = {
-                        "created_at": timestamp,
-                        "last_seen": timestamp,
+                        "created_at": time.time(),
+                        "last_seen": time.time(),
                         "interaction_count": 0,
                         "total_duration": 0,
                         "memories": []
                     }
                 
                 # 更新用户记忆
-                self.user_memories[speaker_id]["last_seen"] = timestamp
+                self.user_memories[speaker_id]["last_seen"] = time.time()
                 self.user_memories[speaker_id]["interaction_count"] += 1
                 self.user_memories[speaker_id]["memories"].append(memory_data)
             else:
@@ -214,9 +213,9 @@ class MemoryProvider(MemoryProviderBase):
                     for memory in memories:
                         if 'metadata' in memory:
                             del memory['metadata']
-                        if 'timestamp' in memory:
-                            del memory['timestamp']
-
+                        """if 'timestamp' in memory:
+                            memory['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(memory['timestamp']))"""
+                            
                     short_memory = self.user_memories[speaker_id].get("short_memory", [])
 
                     mem = '这是你和用户的的通话记录【注意这里都是用户说过的话，你说过的话不在这里】：'+';'.join([str(item['messages']) for item in memories]) + '\n'
@@ -358,6 +357,16 @@ class MemoryProvider(MemoryProviderBase):
                 logger.bind(tag=TAG).warning("No device_id or role_id available, skipping memory save")
         except Exception as e:
             logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
+
+    def get_last_seen_speaker_id(self):
+        """获取最后说话的speaker_id"""
+        last_seen_speaker_id = None
+        last_seen_time = 0
+        for speaker_id, memories in self.user_memories.items():
+            if 'last_seen' in memories and memories['last_seen'] > last_seen_time:
+                last_seen_speaker_id = speaker_id
+                last_seen_time = memories['last_seen']
+        return last_seen_speaker_id
         
     async def save_memory(self, msgs=None):
         """异步保存记忆"""

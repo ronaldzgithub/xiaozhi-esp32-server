@@ -26,9 +26,6 @@ class ProactiveDialogueManager(ProactiveDialogueManagerBase):
         if silence_duration < self.silence_threshold:
             return False
             
-        # 检查冷却时间
-        if current_time - self.last_proactive_time < self.proactive_cooldown:
-            return False
 
         # 检查系统是否正在说话
         if not conn.asr_server_receive:
@@ -37,66 +34,41 @@ class ProactiveDialogueManager(ProactiveDialogueManagerBase):
             
         return True
 
-    async def generate_proactive_content(self, dialogue_history, user_interests):
+    async def generate_proactive_content(self, llm, msgs, short_memory):
         """生成主动对话内容"""
+        # 构建提示词
+        prompt = f"""基于以下对话历史和短期记忆，生成一个主动对话问题。
+                    对话历史: 是个连续的对话，都是用户说过的话， 越往后面的信息越重要。你要特别注意。 
+                    {msgs}
+
+                    短期记忆:
+                    {short_memory}
+
+                    请生成一个自然、友好的问题，引导用户继续讨论相关的话题。
+                    问题应该简短，并且与用户的兴趣相关. 注意，如果你问过了这方面的问题，如果用户没有回答，不要重复问。或者用户明确说不想说这个话题，不要重复问。
+                    可以挑一个和用户说过的话题领域是一个领域， 但是不要直接问已经提及的事情。
+                    """
+        
+        # 构建正确的消息格式
+        messages = [
+            {"role": "system", "content": prompt}
+        ]
+        
         try:
-            # 获取最近的对话记忆
-            recent_messages = dialogue_history[-self.recent_memory_window:]
-            recent_topics = self._analyze_recent_topics(recent_messages)
+            logger.bind(tag=TAG).info(f"Preparing to call LLM response with messages: {messages}")
             
-            # 结合历史兴趣和最近话题
-            combined_interests = self._combine_interests(user_interests, recent_topics)
-            
-            if not combined_interests:
-                return "我注意到你有一段时间没说话了，要不要聊聊天？"
-                
-            # 找出最感兴趣的话题
-            max_interest = max(combined_interests.items(), key=lambda x: x[1])
-            topic = max_interest[0]
-            
-            # 根据话题生成内容
-            if topic == "music":
-                return "我注意到你最近对音乐很感兴趣，要不要听听歌？"
-            elif topic == "news":
-                return "最近有一些有趣的新闻，想听听吗？"
-            elif topic == "weather":
-                return "今天天气不错，要不要聊聊天气？"
-            elif topic == "technology":
-                return "最近科技发展很快，有什么想法吗？"
-            elif topic == "life":
-                return "生活中有趣的事情很多，想聊聊吗？"
-            else:
-                return "我注意到你有一段时间没说话了，要不要聊聊天？"
-                
+            # 使用async for处理异步生成器
+            responses = []
+            async for response in llm.response(None, messages):
+                if response and len(response) > 0:
+                    responses.append(response)
+            logger.bind(tag=TAG).info(f"Generated proactive content: {responses}")
+            return ''.join(responses) or '我们聊点有趣的事情吧'
         except Exception as e:
             logger.bind(tag=TAG).error(f"生成主动对话内容错误: {e}")
-            return "我注意到你有一段时间没说话了，要不要聊聊天？"
-
-    def _analyze_recent_topics(self, recent_messages):
-        """分析最近对话中的话题"""
-        topics = {}
-        for topic in self.interest_keywords.keys():
-            topics[topic] = 0
+            return '我们聊点有趣的事情吧'
             
-        for message in recent_messages:
-            if message.role == "user":
-                content = message.content.lower()
-                for topic, keywords in self.interest_keywords.items():
-                    for keyword in keywords:
-                        if keyword in content:
-                            topics[topic] += 1
-                            
-        return topics
 
-    def _combine_interests(self, historical_interests, recent_topics):
-        """结合历史兴趣和最近话题"""
-        combined = {}
-        for topic in self.interest_keywords.keys():
-            historical = historical_interests.get(topic, 0)
-            recent = recent_topics.get(topic, 0)
-            # 历史兴趣权重0.6，最近话题权重0.4
-            combined[topic] = historical * 0.6 + recent * 0.4
-        return combined
 
     async def update_user_interests(self, dialogue_history):
         """更新用户兴趣"""

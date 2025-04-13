@@ -25,7 +25,6 @@ from config.private_config import PrivateConfig
 from core.auth import AuthMiddleware, AuthenticationError
 from core.utils.auth_code_gen import AuthCodeGenerator
 from core.mcp.manager import MCPManager
-from core.tts_service import TTSService
 from core.performance_monitor import PerformanceMonitor
 
 TAG = __name__
@@ -44,11 +43,8 @@ class ConnectionHandler:
         self.auth = AuthMiddleware(config)
         self.proactive_check_task = None  # 添加主动对话检查任务
 
-        # 预初始化TTS服务
-        #self.tts_service = TTSService(_tts.config)
         # 使用线程池预初始化TTS服务
         self.executor = ThreadPoolExecutor(max_workers=10)
-        self.executor.submit(self._initialize_tts_service)
         
         # 初始化性能监控
         self.performance_monitor = PerformanceMonitor()
@@ -492,10 +488,7 @@ class ConnectionHandler:
             future.result()
             return True
 
-        # 更新最后交互时间
-        if self.proactive:
-            current_time = time.time()
-            self.proactive.update_last_interaction(current_time)
+       
 
         if not tool_call:
             self.dialogue.put(Message(role="user", content=query,  metadata={
@@ -630,6 +623,11 @@ class ConnectionHandler:
             self.performance_monitor.end_request(success=True)
             # 记录性能指标
             self.performance_monitor.log_metrics()
+
+
+            # 更新最后交互时间
+            if self.proactive:
+                self.proactive.update_last_interaction( time.time())
 
             return full_text
 
@@ -806,6 +804,11 @@ class ConnectionHandler:
                 future = asyncio.run_coroutine_threadsafe(sendAudioMessage(self, opus_datas, text, text_index),
                                                           self.loop)
                 future.result()
+                
+                # 更新最后交互时间
+                if self.proactive:
+                    self.proactive.update_last_interaction( time.time())
+
             except Exception as e:
                 self.logger.bind(tag=TAG).error(f"audio_play_priority priority_thread: {text} {e}")
             asyncio.sleep(0.01)
@@ -907,8 +910,6 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).error(f"TTS生成失败: {text}")
                 return
 
-            # 发送音频响应
-            await self.send_audio_response(tts_file)
 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"发送文本响应失败: {e}")
@@ -925,9 +926,16 @@ class ConnectionHandler:
         current_time = time.time()
         if await self.proactive.should_initiate_dialogue(current_time, self):
             # 生成主动对话内容
+            last_seen_speaker_id = self.memory.get_last_seen_speaker_id()
+            if last_seen_speaker_id:
+                self.logger.bind(tag=TAG).info(f"Last seen speaker ID: {last_seen_speaker_id}")
+            else:
+                self.logger.bind(tag=TAG).info("No last seen speaker ID found.")
+
             content = await self.proactive.generate_proactive_content(
-                self.dialogue.dialogue,
-                self.proactive.user_interests
+                self.llm,
+                self.memory.user_memories.get(last_seen_speaker_id, {}).get('memories', []),
+                self.memory.user_memories.get(last_seen_speaker_id, {}).get('short_memory', []),
             )
             self.dialogue.put(Message(role="assistant", content=content))
             if await self.send_full_audio_message(content):
@@ -948,10 +956,9 @@ class ConnectionHandler:
         await send_stt_message(self, content)
         
         # 直接使用 ByteDance TTS provider 生成语音
-        tts_file = await self.tts.text_to_speak(content)
-        if tts_file:
-            await self.send_audio_response(tts_file)
-        
+        tts_file = await self.tts.text_to_speak(content, 0)
+        self.tts_last_text_index = 0
+        self.tts_first_text_index = 0
         self.llm_finish_task = True
         self.asr_server_receive = True
         self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
@@ -969,7 +976,7 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).error(f"主动对话检查任务出错: {e}")
                 await asyncio.sleep(self.proactive.config.get("silence_threshold", 60))  # 出错后等待配置的时间间隔再试
 
-            asyncio.sleep(1)
+            asyncio.sleep(5)
 
     async def handle_audio_message(self, audio, text, speaker_id)->bool:
         """
@@ -1131,22 +1138,3 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"切换角色失败: {e}")
             return False
-
-    def _initialize_tts_service(self):
-        """异步初始化TTS服务"""
-        try:
-            asyncio.run(self.tts_service.initialize())
-            self.logger.bind(tag=TAG).info("TTS服务初始化完成")
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"TTS服务初始化失败: {e}")
-
-    async def _tts_preload_worker(self):
-        """TTS预加载工作线程"""
-        while True:
-            try:
-                text = await self.tts_preload_queue.get()
-                if text:
-                    # 预加载TTS
-                    await self.tts_service.process(text)
-            except Exception as e:
-                self.logger.bind(tag=TAG).error(f"TTS预加载错误: {e}")

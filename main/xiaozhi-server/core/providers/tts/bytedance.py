@@ -292,7 +292,7 @@ class TTSProvider(TTSProviderBase):
         self.max_queue_size = config.get("max_queue_size", 100)  # 添加队列大小限制
         self.pending_texts = asyncio.Queue(maxsize=self.max_queue_size)  # 设置队列最大大小
         self.connection_ready = asyncio.Event()  # 用于标记连接是否就绪
-        # 初始化 WebSocket 连接
+        # 初始化 WebSocket 连接, 这里我们在创建的时候就开始了链接， 后面可以优化一下， 只有在连接的时候才真的去建立连接。 
         asyncio.create_task(self._init_connection())
         asyncio.create_task(self._session_manager())
 
@@ -463,16 +463,15 @@ class TTSProvider(TTSProviderBase):
             logger.bind(tag=TAG).error("No audio data collected")
         else:
             logger.bind(tag=TAG).error("audio_play_queue is None, cannot send audio packet")
+
     async def _session_manager(self):
         """管理会话的进程"""
         while not self.stop_event.is_set():
             try:
                 # 等待连接就绪
-                await self.connection_ready.wait()
-                
+                await self.connection_ready.wait()             
                 # 获取待处理文本
                 text_info = await self.pending_texts.get()
-                
                 # 处理文本
                 await self._process_text(text_info)
                 self.pending_texts.task_done()

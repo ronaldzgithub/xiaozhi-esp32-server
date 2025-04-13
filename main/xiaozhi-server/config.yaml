@@ -934,16 +934,10 @@ Emotion:
 Proactive:
   lightweight:
     enabled: true
-    silence_threshold: 100  # 沉默阈值(秒)
+    silence_threshold: 20  # 沉默阈值(秒)
     recent_memory_window: 5  # 分析最近5条对话
-    min_interaction_count: 2 # 最少交互次数
-    proactive_cooldown: 300  # 主动对话冷却时间(秒)
-    interest_keywords:  # 用户兴趣关键词
-      music: ["音乐", "歌曲", "播放", "歌"]
-      news: ["新闻", "时事", "热点"]
-      weather: ["天气", "温度", "下雨"]
-      technology: ["科技", "技术", "创新"]
-      life: ["生活", "日常", "习惯"]
+    min_interaction_count: 1 # 最少交互次数
+
 
 # 声纹识别配置
 # 声纹识别配置
