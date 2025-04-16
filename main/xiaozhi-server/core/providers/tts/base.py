@@ -22,12 +22,16 @@ class TTSProviderBase(ABC):
         pass
 
     def to_tts(self, text):
+
+        asyncio.run(self.text_to_speak(text, 1))
+
+        return None
         tmp_file = self.generate_filename()
         try:
             max_repeat_time = 5
             text = MarkdownCleaner.clean_markdown(text)
             while not os.path.exists(tmp_file) and max_repeat_time > 0:
-                asyncio.run(self.text_to_speak(text, tmp_file))
+                asyncio.run(self.text_to_speak(text, 0, tmp_file))
                 if not os.path.exists(tmp_file):
                     max_repeat_time = max_repeat_time - 1
                     logger.bind(tag=TAG).error(f"语音生成失败: {text}:{tmp_file}，再试{max_repeat_time}次")

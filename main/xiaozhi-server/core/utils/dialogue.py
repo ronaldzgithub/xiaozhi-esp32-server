@@ -79,7 +79,7 @@ class Dialogue:
 
         # 添加用户和助手的对话
         for m in self.dialogue:
-            if m.role != "system":  # 跳过原始的系统消息
+            if m.role != "system" and m.role != "tool":  # 跳过原始的系统消息
                 self.getMessages(m, dialogue)
 
         return dialogue

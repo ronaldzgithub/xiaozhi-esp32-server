@@ -167,7 +167,7 @@ class IntentProvider(IntentProviderBase):
         llm_start_time = time.time()
         logger.bind(tag=TAG).info(f"开始LLM意图识别调用, 模型: {model_info}")
         
-        intent = self.llm.response_no_stream(
+        intent = await self.llm.response_no_stream(
             system_prompt=prompt_music,
             user_prompt=user_prompt
         )

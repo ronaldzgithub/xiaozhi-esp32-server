@@ -70,21 +70,26 @@ def getWakeupWordFile(file_name):
 
 async def wakeupWordsResponse(conn):
     """唤醒词响应"""
-    wakeup_word = random.choice(WAKEUP_CONFIG["words"])
-    result = conn.llm.response_no_stream(conn.config["prompt"], wakeup_word)
-    tts_file = await asyncio.to_thread(conn.tts.to_tts, result)
+    tts_file = None
+    try:
+        wakeup_word = random.choice(WAKEUP_CONFIG["words"])
+        result = await conn.llm.response_no_stream(conn.config["prompt"], wakeup_word)
+        tts_file = conn.send_full_audio_message(result)
+    except Exception as e:
+        
+        if tts_file is not None and os.path.exists(tts_file):
+            file_type = os.path.splitext(tts_file)[1]
+            if file_type:
+                file_type = file_type.lstrip(".")
+            old_file = getWakeupWordFile("my_" + WAKEUP_CONFIG["file_name"])
+            if old_file is not None:
+                os.remove(old_file)
+            """将文件挪到"wakeup_words.mp3"""
+            shutil.move(
+                tts_file,
+                WAKEUP_CONFIG["dir"] + "my_" + WAKEUP_CONFIG["file_name"] + "." + file_type,
+            )
+            WAKEUP_CONFIG["create_time"] = time.time()
+            WAKEUP_CONFIG["text"] = result
 
-    if tts_file is not None and os.path.exists(tts_file):
-        file_type = os.path.splitext(tts_file)[1]
-        if file_type:
-            file_type = file_type.lstrip(".")
-        old_file = getWakeupWordFile("my_" + WAKEUP_CONFIG["file_name"])
-        if old_file is not None:
-            os.remove(old_file)
-        """将文件挪到"wakeup_words.mp3"""
-        shutil.move(
-            tts_file,
-            WAKEUP_CONFIG["dir"] + "my_" + WAKEUP_CONFIG["file_name"] + "." + file_type,
-        )
-        WAKEUP_CONFIG["create_time"] = time.time()
-        WAKEUP_CONFIG["text"] = result
+        return True
