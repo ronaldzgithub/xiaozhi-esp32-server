@@ -2,7 +2,7 @@
 # 在开发中，在项目根目录创建data目录，将【config.yaml】复制一份，改成【.config.yaml】，放进data目录中
 # 系统会优先读取【data/.config.yaml】文件的配置。
 # 这样做，可以避免在提交代码的时候，错误地提交密钥信息，保护您的密钥安全。
-use_private_config: true
+use_private_config: false
 # 服务器基础配置(Basic server configuration)
 server:
   # 服务器监听地址和端口(Server listening address and port)
@@ -342,6 +342,7 @@ TTS:
     appid: "7864085684"
     access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
     cluster: volcano_tts
+
   bytedanceStream:
     # 定义TTS API类型
     type: bytedance
@@ -350,6 +351,7 @@ TTS:
     appid: "7864085684"
     access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
     output_dir: tmp/
+    
   CosyVoiceSiliconflow:
     type: siliconflow
     # 硅基流动TTS
@@ -359,6 +361,7 @@ TTS:
     output_dir: tmp/
     access_token: 你的硅基流动API密钥
     response_format: wav
+
   CozeCnTTS:
     type: cozecn
     # COZECN TTS
@@ -606,6 +609,7 @@ roles:
     voice:
       edge: "zh-CN-XiaoyiNeural"  # Edge TTS 音色
       doubao: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
+      bytedance: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
       TTS302AI: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
       GizwitsTTS: "zh_female_wanwanxiaohe_moon_bigtts"  # 火山引擎音色
       minimax: "female-shaonv"  # Minimax音色
@@ -622,12 +626,44 @@ roles:
         pitch: high
         speed: medium
         tone: sweet
+  - name: "英语小朋友"
+    description: "A girl from California who can chat freely and discuss topics related to children"
+    prompt: |
+      "You are a girl from California who can chat freely and discuss topics related to children.
+      [Core Traits]
+      - Speaks in a relaxed style with a California accent
+      - Enjoys discussing children's games, animations, and stories
+      - Can explain complex concepts in simple English
+      [Interaction Guidelines]
+      When users:
+      - Ask questions related to children → Explain in simple English, providing interesting examples
+      - Discuss games or animations → Share your preferences and experiences in a relaxed tone
+      - Learn English → Provide interesting learning suggestions in simple English
+      Please note, speak like a human, do not reply with emojis, code, and xml tags."
+    voice:
+      edge: "en-US-ChildNeural"
+      doubao: "zh_female_mengyatou_mars_bigtts"
+      bytedance: "zh_female_mengyatou_mars_bigtts"  # 火山引擎音色
+      minimax: "female-en-us-child"
+      aliyun: "child"
+      openai: "child"
+      tencent: "101021"
+      voice_features:
+        gender: female
+        age: child
+        style: casual
+        language: english
+        accent: california
+        emotion: playful
+        pitch: high
+        speed: fast
+        tone: cheerful
   - name: "英语老师"
     description: "专业的英语教师，可以帮助学习英语"
     prompt: |
-      "You are Jenny, a vibrant English teacher from California with a passion for making learning fun and engaging.
+      "You are Jenny, a vibrant girl from California with a passion for making conversation fun and engaging.
       [Core Traits]
-      - Energetic teaching style with a natural American accent
+      - Energetic speaking style with a natural American accent
       - Uses pop culture references to explain grammar points
       - Makes learning fun with real-life examples and stories
       [Interaction Guidelines]
@@ -636,7 +672,7 @@ roles:
       - Learn vocabulary → Create memorable connections to daily life
       - Practice speaking → Use role-play scenarios from popular situations
       Special features:
-      - Often says "That's a great question!"
+      - Often says "you are awesome!"
       - Uses encouraging phrases like "You're getting better!"
       - Shares interesting cultural context when relevant
       Remember to:
@@ -647,6 +683,7 @@ roles:
     voice:
       edge: "en-US-JennyNeural"
       doubao: "zh_female_shuangkuaisisi_moon_bigtts"
+      bytedance: "zh_female_shuangkuaisisi_moon_bigtts"  # 火山引擎音色
       minimax: "female-en-us"
       aliyun: "jenny"
       openai: "alloy"
@@ -680,6 +717,7 @@ roles:
     voice:
       edge: "zh-CN-YunxiNeural"
       doubao: "zh_female_kailangjiejie_moon_bigtts"
+      bytedance: "zh_female_kailangjiejie_moon_bigtts"  # 火山引擎音色
       minimax: "male-qn-qingse"
       aliyun: "yunxi"
       openai: "onyx"
@@ -714,6 +752,7 @@ roles:
     voice:
       edge: "zh-CN-YunjianNeural"
       doubao: "zh_female_zhixingnvsheng_mars_bigtts"
+      bytedance: "zh_female_zhixingnvsheng_mars_bigtts"  # 火山引擎音色
       minimax: "male-qn-qingse"
       aliyun: "yunjian"
       openai: "echo"
@@ -749,6 +788,7 @@ roles:
     voice:
       edge: "zh-CN-YunyangNeural"
       doubao: "zh_male_zhangwei_moon_bigtts"
+      bytedance: "zh_male_zhangwei_moon_bigtts"  # 火山引擎音色
       minimax: "male-qn-qingse"
       aliyun: "yunyang"
       openai: "fable"
@@ -784,6 +824,7 @@ roles:
     voice:
       edge: "zh-CN-YunyangNeural"
       doubao: "zh_male_naiqimengwa_mars_bigtts"  
+      bytedance: "zh_male_naiqimengwa_mars_bigtts"  # 火山引擎音色
       minimax: "male-qn-qingse"
       aliyun: "yunyang"
       openai: "fable"
@@ -857,6 +898,7 @@ roles:
     voice:
       edge: "zh-CN-XiaoxiaoNeural"
       doubao: "zh_female_linjianvhai_moon_bigtts"
+      bytedance: "zh_female_linjianvhai_moon_bigtts"  # 火山引擎音色
       minimax: "female-qn-qingse"
       aliyun: "xiaoxiao"
       openai: "nova"
@@ -894,6 +936,7 @@ roles:
     voice:
       edge: "zh-CN-YunxiNeural"
       doubao: "zh_male_jingqiangkanye_moon_bigtts"
+      bytedance: "zh_male_jingqiangkanye_moon_bigtts"  # 火山引擎音色
       minimax: "male-qn-qingse"
       aliyun: "yunxi"
       openai: "onyx"

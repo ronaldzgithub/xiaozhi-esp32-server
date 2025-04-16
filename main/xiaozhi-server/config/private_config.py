@@ -62,7 +62,7 @@ class PrivateConfig:
                             selected_vad: deepcopy(self.default_config['VAD'][selected_vad])
                         },
                         'auth_code': auth_code,  # 添加认证码字段
-                        'admin_speaker_id': self.admin_speaker_id,  # 添加管理员speaker_id字段
+                        'admin_speaker_id': self.private_config.get('admin_speaker_id', None),  # 添加管理员speaker_id字段
                     }
                     
                     all_configs[self.device_id] = device_config
@@ -143,6 +143,10 @@ class PrivateConfig:
         """设置管理员speaker_id"""
         self.private_config['admin_speaker_id'] = speaker_id
         await self.update_last_chat_time()
+
+    def get_admin_speaker_id(self):
+        """获取管理员speaker_id"""
+        return self.private_config.get('admin_speaker_id')
 
     def verify_admin_voiceprint(self, speaker_id):
         """验证声纹是否为管理员声纹"""

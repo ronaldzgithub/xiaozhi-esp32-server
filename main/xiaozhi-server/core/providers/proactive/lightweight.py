@@ -34,25 +34,35 @@ class ProactiveDialogueManager(ProactiveDialogueManagerBase):
             
         return True
 
-    async def generate_proactive_content(self, llm, msgs, short_memory):
+    async def generate_proactive_content(self, dialogue, llm, msgs, short_memory):
         """生成主动对话内容"""
+        messages = []
+        system_message = next(
+            (msg for msg in dialogue if msg.role == "system"), None
+        )
         # 构建提示词
         prompt = f"""基于以下对话历史和短期记忆，生成一个主动对话问题。
-                    对话历史: 是个连续的对话，都是用户说过的话， 越往后面的信息越重要。你要特别注意。 
-                    {msgs}
+                对话历史: 是个连续的对话，都是用户说过的话， 越往后面的信息越重要。你要特别注意。 
+                {msgs}
 
-                    短期记忆:
-                    {short_memory}
+                短期记忆:
+                {short_memory}
 
-                    请生成一个自然、友好的问题，引导用户继续讨论相关的话题。
-                    问题应该简短，并且与用户的兴趣相关. 注意，如果你问过了这方面的问题，如果用户没有回答，不要重复问。或者用户明确说不想说这个话题，不要重复问。
-                    可以挑一个和用户说过的话题领域是一个领域， 但是不要直接问已经提及的事情。
-                    """
-        
-        # 构建正确的消息格式
-        messages = [
-            {"role": "system", "content": prompt}
-        ]
+                请生成一个自然、友好的问题，引导用户继续讨论相关的话题。
+                问题应该简短，并且与用户的兴趣相关. 注意，如果你问过了这方面的问题，如果用户没有回答，不要重复问。或者用户明确说不想说这个话题，不要重复问。
+                可以挑一个和用户说过的话题领域是一个领域， 但是不要直接问已经提及的事情。
+                """
+        if system_message:
+            enhanced_system_prompt = (
+                f"{system_message.content}\n\n"
+                f"回答问题时候，一定注意！注意！注意！注意！注意！第一个标点符号不要超过第四个字符！也就是说用1到4个字来开始回答问题！\n\n" 
+                f"{prompt}"  
+            )
+
+            enhanced_system_prompt = enhanced_system_prompt.replace("'", "\"")
+            messages.append({"role": "system", "content": enhanced_system_prompt})
+        else:
+            messages.append({"role": "system", "content": prompt})  
         
         try:
             logger.bind(tag=TAG).info(f"Preparing to call LLM response with messages: {messages}")

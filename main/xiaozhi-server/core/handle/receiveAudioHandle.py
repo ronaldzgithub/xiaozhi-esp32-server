@@ -47,18 +47,29 @@ async def handleAudioMessage(conn, audio):
         else:
             # 创建任务列表
             tasks = []
+
+            start_time = time.time()
             
             # 添加语音识别任务
             asr_task = asyncio.create_task(conn.asr.speech_to_text(conn.asr_audio, conn.session_id))
             tasks.append(asr_task)
-            
+
+            # 添加说话人识别任务
+            if conn.private_config:
+                speaker_task = asyncio.create_task(conn.voiceprint.identify_speaker(conn.asr_audio, conn.headers.get('device_id')))
+                tasks.append(speaker_task)
+
+                speaker_id = await speaker_task
+                logger.bind(tag=TAG).info(f"识别说话人: {speaker_id} 用时: {time.time() - start_time}秒")
+            else:
+                speaker_id = 'speaker_0'
+
             # 等待语音识别完成
             text, file_path = await asr_task
-            logger.bind(tag=TAG).info(f"识别文本: {text}")
+            logger.bind(tag=TAG).info(f"识别文本: {text} 用时: {time.time() - start_time}秒")
             
             text_len, _ = remove_punctuation_and_length(text)
             if text_len > 0:
-                speaker_id = 'speaker_0'
                 
                 # 添加音频消息处理任务
                 audio_task = asyncio.create_task(conn.handle_audio_message(conn.asr_audio, text, speaker_id))

@@ -83,3 +83,4 @@ class Dialogue:
                 self.getMessages(m, dialogue)
 
         return dialogue
+

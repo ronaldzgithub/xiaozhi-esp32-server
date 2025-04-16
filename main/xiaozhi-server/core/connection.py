@@ -53,41 +53,7 @@ class ConnectionHandler:
         self.tts_preload_queue = asyncio.Queue(maxsize=5)
         self.tts_preload_task = None
 
-        """# 添加情感识别模块
-        emotion_cls_name = self.config["selected_module"].get("Emotion", "lightweight")
-        has_emotion_cfg = self.config.get("Emotion") and emotion_cls_name in self.config["Emotion"]
-        emotion_cfg = self.config["Emotion"][emotion_cls_name] if has_emotion_cfg else {}
         
-        try:
-            from core.providers.emotion.lightweight import EmotionProvider
-            self.emotion = EmotionProvider(emotion_cfg)
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"情感识别模块初始化失败: {e}")
-            self.emotion = None"""
-
-        # 添加主动对话模块
-        proactive_cls_name = self.config["selected_module"].get("Proactive", "lightweight")
-        has_proactive_cfg = self.config.get("Proactive") and proactive_cls_name in self.config["Proactive"]
-        proactive_cfg = self.config["Proactive"][proactive_cls_name] if has_proactive_cfg else {}
-        
-        try:
-            from core.providers.proactive.lightweight import ProactiveDialogueManager
-            self.proactive = ProactiveDialogueManager(proactive_cfg)
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"主动对话模块初始化失败: {e}")
-            self.proactive = None
-
-        # 添加声纹识别模块
-        voiceprint_cls_name = self.config["selected_module"].get("Voiceprint", "lightweight")
-        has_voiceprint_cfg = self.config.get("Voiceprint") and voiceprint_cls_name in self.config["Voiceprint"]
-        voiceprint_cfg = self.config["Voiceprint"][voiceprint_cls_name] if has_voiceprint_cfg else {}
-        
-        try:
-            from core.providers.voiceprint.lightweight import VoiceprintProvider
-            self.voiceprint = VoiceprintProvider(voiceprint_cfg)
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"声纹识别模块初始化失败: {e}")
-            self.voiceprint = None
 
         self.websocket = None
         self.headers = None
@@ -114,6 +80,13 @@ class ConnectionHandler:
         self.tts = _tts
         self.memory = _memory
         self.intent = _intent
+
+        # 设置 TTS 音频播放队列
+        self.tts.set_audio_play_queue(self.audio_play_queue)
+        self.logger.bind(tag=TAG).info(f"TTS queue: {self.tts}")
+        self.logger.bind(tag=TAG).info(f"Audio play queue: {self.audio_play_queue}")
+        self.logger.bind(tag=TAG).info(f"Audio play queue: {self.tts.set_audio_play_queue}")
+
 
         # 设置 TTS 队列
         if hasattr(self.tts, 'set_tts_queue'):
@@ -184,8 +157,43 @@ class ConnectionHandler:
             self.family_wizard = None
             self.is_adding_family_member = False
 
-        # 设置 TTS 音频播放队列
-        self.tts.set_audio_play_queue(self.audio_play_queue)
+
+
+        """# 添加情感识别模块
+        emotion_cls_name = self.config["selected_module"].get("Emotion", "lightweight")
+        has_emotion_cfg = self.config.get("Emotion") and emotion_cls_name in self.config["Emotion"]
+        emotion_cfg = self.config["Emotion"][emotion_cls_name] if has_emotion_cfg else {}
+        
+        try:
+            from core.providers.emotion.lightweight import EmotionProvider
+            self.emotion = EmotionProvider(emotion_cfg)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"情感识别模块初始化失败: {e}")
+            self.emotion = None"""
+
+        # 添加主动对话模块
+        proactive_cls_name = self.config["selected_module"].get("Proactive", "lightweight")
+        has_proactive_cfg = self.config.get("Proactive") and proactive_cls_name in self.config["Proactive"]
+        proactive_cfg = self.config["Proactive"][proactive_cls_name] if has_proactive_cfg else {}
+        
+        try:
+            from core.providers.proactive.lightweight import ProactiveDialogueManager
+            self.proactive = ProactiveDialogueManager(proactive_cfg)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"主动对话模块初始化失败: {e}")
+            self.proactive = None
+
+        # 添加声纹识别模块
+        voiceprint_cls_name = self.config["selected_module"].get("Voiceprint", "lightweight")
+        has_voiceprint_cfg = self.config.get("Voiceprint") and voiceprint_cls_name in self.config["Voiceprint"]
+        voiceprint_cfg = self.config["Voiceprint"][voiceprint_cls_name] if has_voiceprint_cfg else {}
+        
+        try:
+            from core.providers.voiceprint.lightweight import VoiceprintProvider
+            self.voiceprint = VoiceprintProvider(voiceprint_cfg)
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"声纹识别模块初始化失败: {e}")
+            self.voiceprint = None
 
     async def handle_connection(self, ws):
         try:
@@ -226,14 +234,14 @@ class ConnectionHandler:
                             # 设置标志，表示需要等待管理员声纹
                             self.private_config.waiting_for_admin_voiceprint = True
 
-                    llm, tts = self.private_config.create_private_instances()
+                    """llm, tts = self.private_config.create_private_instances()
                     if all([llm, tts]):
                         self.llm = llm
                         self.tts = tts
                         self.logger.bind(tag=TAG).info(f"Loaded private config and instances for device {device_id}")
                     else:
                         self.logger.bind(tag=TAG).error(f"Failed to create instances for device {device_id}")
-                        self.private_config = None
+                        self.private_config = None"""
                 except Exception as e:
                     self.logger.bind(tag=TAG).error(f"Error initializing private config: {e}")
                     self.private_config = None
@@ -430,7 +438,7 @@ class ConnectionHandler:
             current_text = full_text[processed_chars:]  # 从未处理的位置开始
 
             # 查找最后一个有效标点
-            punctuations = ("。", "？", "！", "；", "：")
+            punctuations = ("。", "？", "！", "；", "：", ".", "?", "!", ";", ":")
             last_punct_pos = -1
             for punct in punctuations:
                 pos = current_text.rfind(punct)
@@ -538,7 +546,7 @@ class ConnectionHandler:
             content_arguments = ""
 
             # 使用正则表达式优化标点查找
-            punctuations_pattern = re.compile(r'[,，；。？！；：、.;n!~～?]')
+            punctuations_pattern = re.compile(r'[,，；。？！；：、.;n!~～\?]')
 
             """# 启动TTS预加载任务
             if self.tts_preload_task is None:
@@ -557,11 +565,13 @@ class ConnectionHandler:
                         full_text = "".join(response_message)
                         current_text = full_text[processed_chars:]
                         
-                        # 使用正则表达式查找最后一个标点
-                        last_punct_match = max(punctuations_pattern.finditer(current_text), 
-                                            key=lambda x: x.start(), 
-                                            default=None)
-                        last_punct_pos = last_punct_match.start() if last_punct_match else -1
+                        # 查找最后一个有效标点
+                        punctuations = ("。","，", "？", "！", "；", "：", ".", ",","?", "!", ";", ":")
+                        last_punct_pos = -1
+                        for punct in punctuations:
+                            pos = current_text.rfind(punct)
+                            if pos > last_punct_pos:
+                                last_punct_pos = pos
 
                         if last_punct_pos != -1:
                             segment_text_raw = current_text[:last_punct_pos + 1]
@@ -571,7 +581,7 @@ class ConnectionHandler:
                                 text_index += 1
                                 
                                 # 如果还没有说出第一句话，则说出前4个字或第一个标点符号之前的文本,这是为了加速响应
-                                if self.tts_first_text_index == -1:
+                                if self.tts_first_text_index == -1 and False:
                                     if last_punct_pos < 10:
                                         first_text = segment_text[:last_punct_pos + 1]
                                     else:
@@ -610,6 +620,7 @@ class ConnectionHandler:
 
             # 处理函数调用
             if tool_call_flag:
+                self.current_speaker_id = speaker_id
                 self._handle_tool_call(function_name, function_id, function_arguments, content_arguments, text_index)
 
             # 存储对话内容
@@ -938,6 +949,7 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).info("No last seen speaker ID found.")
 
             content = await self.proactive.generate_proactive_content(
+                self.dialogue.dialogue,
                 self.llm,
                 self.memory.user_memories.get(last_seen_speaker_id, {}).get('memories', []),
                 self.memory.user_memories.get(last_seen_speaker_id, {}).get('short_memory', []),
@@ -987,7 +999,7 @@ class ConnectionHandler:
         """处理音频消息"""
         try:
             # 如果正在等待管理员声纹，则处理声纹识别
-            if hasattr(self.private_config, 'waiting_for_admin_voiceprint') and self.private_config.waiting_for_admin_voiceprint:
+            if self.private_config and hasattr(self.private_config, 'waiting_for_admin_voiceprint') and self.private_config.waiting_for_admin_voiceprint:
                 if self.voiceprint:
                     try:
                         # 识别说话人
@@ -1121,6 +1133,7 @@ class ConnectionHandler:
                     if voice:
                         self.tts.set_voice(voice)
                         self.logger.bind(tag=TAG).info(f"已设置TTS语音为: {voice}")
+                    
             
             self.logger.bind(tag=TAG).info(f"成功切换到角色: {role_name}")
             return True

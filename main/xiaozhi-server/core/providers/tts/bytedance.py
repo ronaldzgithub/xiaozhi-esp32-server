@@ -303,8 +303,9 @@ class TTSProvider(TTSProviderBase):
 
     def set_audio_play_queue(self, audio_play_queue):
         """设置从 connection.py 传递过来的 audio_play_queue"""
+        logger.bind(tag=TAG).info(f"Setting audio_play_queue: {audio_play_queue}")
         self.audio_play_queue = audio_play_queue
-        logger.bind(tag=TAG).info("Audio play queue has been set from connection.py")
+        logger.bind(tag=TAG).info(f"Audio play queue has been set from connection.py, current value: {self.audio_play_queue}")
 
     def generate_filename(self):
         """Generate a unique filename for the TTS output"""
