@@ -55,7 +55,7 @@ async def handleAudioMessage(conn, audio):
             tasks.append(asr_task)
 
             # 添加说话人识别任务
-            if conn.private_config:
+            if conn.private_config and False:
                 speaker_task = asyncio.create_task(conn.voiceprint.identify_speaker(conn.asr_audio, conn.headers.get('device_id')))
                 tasks.append(speaker_task)
 

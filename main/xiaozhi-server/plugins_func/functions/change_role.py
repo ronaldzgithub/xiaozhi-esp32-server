@@ -33,7 +33,7 @@ def change_role(conn, name: str):
     """切换角色"""
     # 检查是否是管理员
 
-    if hasattr(conn, 'current_speaker_id') and conn.private_config and conn.current_speaker_id != conn.private_config.get_admin_speaker_id():
+    if False and hasattr(conn, 'current_speaker_id') and conn.private_config and conn.current_speaker_id != conn.private_config.get_admin_speaker_id():
             logger.bind(tag=TAG).info(f"非管理员尝试切换角色: {conn.current_speaker_id}")
             return ActionResponse(action=Action.RESPONSE, result="切换角色失败", response="只有管理员才能切换角色")
         

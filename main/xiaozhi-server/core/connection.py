@@ -234,14 +234,15 @@ class ConnectionHandler:
                             # 设置标志，表示需要等待管理员声纹
                             self.private_config.waiting_for_admin_voiceprint = True
 
-                    """llm, tts = self.private_config.create_private_instances()
+                    llm, tts = self.private_config.create_private_instances()
                     if all([llm, tts]):
                         self.llm = llm
                         self.tts = tts
+                        self.tts.set_audio_play_queue(self.audio_play_queue)
                         self.logger.bind(tag=TAG).info(f"Loaded private config and instances for device {device_id}")
                     else:
                         self.logger.bind(tag=TAG).error(f"Failed to create instances for device {device_id}")
-                        self.private_config = None"""
+                        self.private_config = None
                 except Exception as e:
                     self.logger.bind(tag=TAG).error(f"Error initializing private config: {e}")
                     self.private_config = None
@@ -579,13 +580,24 @@ class ConnectionHandler:
                             
                             if segment_text:
                                 text_index += 1
-                                
                                 # 如果还没有说出第一句话，则说出前4个字或第一个标点符号之前的文本,这是为了加速响应
-                                if self.tts_first_text_index == -1 and False:
-                                    if last_punct_pos < 10:
-                                        first_text = segment_text[:last_punct_pos + 1]
-                                    else:
-                                        first_text = segment_text[:10]
+                                if self.tts_first_text_index == -1:
+
+                                    first_pause_pos = 10
+
+                                    wordstopause = ['我','你','他','的','是','她','它','有']
+                                    pause_positions = []
+                                    for word in wordstopause:
+                                        pos = segment_text.find(word)
+                                        if pos != -1:
+                                            pause_positions.append(pos)
+                                    if pause_positions:
+                                        first_pause_pos = max(6,min(max(pause_positions), first_pause_pos))
+                                    
+                                    if last_punct_pos < first_pause_pos:
+                                        first_pause_pos = last_punct_pos
+                                
+                                    first_text = segment_text[:first_pause_pos]
                                     self.speak_and_play(first_text, text_index)
                                     self.tts_first_text_index = text_index
                                     segment_text = segment_text[len(first_text):]
@@ -738,6 +750,8 @@ class ConnectionHandler:
                 function_id = function_call_data["id"]
                 function_name = function_call_data["name"]
                 function_arguments = function_call_data["arguments"]
+                if not isinstance(function_arguments, str):
+                    function_arguments = json.dumps(function_arguments)
                 self.dialogue.put(Message(role='assistant',
                                           tool_calls=[{"id": function_id,
                                                        "function": {"arguments": function_arguments,

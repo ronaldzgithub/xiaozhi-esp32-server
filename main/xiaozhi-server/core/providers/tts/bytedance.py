@@ -380,9 +380,10 @@ class TTSProvider(TTSProviderBase):
             self.session_id = uuid.uuid4().__str__().replace('-', '')
             await start_session(self.ws, self.voice, self.session_id)
             res = parser_response(await self.ws.recv())
-            logger.bind(tag=TAG).debug(f"Session started in {(datetime.now() - session_start_time).total_seconds():.2f}s")
+            logger.bind(tag=TAG).info(f"Session started in {(datetime.now() - session_start_time).total_seconds():.2f}s")
             
             if res.optional.event != EVENT_SessionStarted:
+                await finish_session(self.ws, self.session_id)
                 raise RuntimeError(f"Start session failed: {res.optional.__dict__}")
             
             # 发送文本
