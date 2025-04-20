@@ -487,17 +487,12 @@ class TTSProvider(TTSProviderBase):
     async def text_to_speak(self, text, text_index = 0, output_file=None):
         """Convert text to speech using ByteDance TTS API"""
         try:
-            # 如果 output_file 为 None，生成一个新的文件名
-            if output_file is None:
-                output_file = self.generate_filename()
-
             # 生成文本ID并记录对应关系
             text_id = str(uuid.uuid4())
             self.current_text_id = text_id
             self.text_audio_map[text_id] = {
                 'text': text,
                 'text_index': text_index,
-                'audio_file': output_file,
                 'status': 'processing'
             }
             
@@ -506,7 +501,6 @@ class TTSProvider(TTSProviderBase):
                 'text_id': text_id,
                 'text': text,
                 'text_index': text_index,
-                'audio_file': output_file,
                 'put_time': datetime.now()  # 记录放入队列的时间
             }
             

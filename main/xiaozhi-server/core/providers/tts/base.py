@@ -13,9 +13,9 @@ logger = setup_logging()
 
 
 class TTSProviderBase(ABC):
-    def __init__(self, config, delete_audio_file):
+    def __init__(self, config, delete_audio_file = True):
         self.delete_audio_file = delete_audio_file
-        self.output_file = config.get("output_dir")
+        self.output_file = config.get("output_dir", "tmp/")
 
     @abstractmethod
     def generate_filename(self):
@@ -45,7 +45,7 @@ class TTSProviderBase(ABC):
             return None
 
     @abstractmethod
-    async def text_to_speak(self, text, output_file):
+    async def text_to_speak(self, text, output_file, session_id=None):
         pass
 
     def set_voice(self, voice):

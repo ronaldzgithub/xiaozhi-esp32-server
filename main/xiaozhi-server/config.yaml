@@ -85,7 +85,7 @@ selected_module:
   # 将根据配置名称对应的type调用实际的LLM适配器
   LLM: DoubaoLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
-  TTS: bytedanceStream
+  TTS: tts_pool  # 修改为使用TTSPool
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
   Memory: mem_local_short
   # 意图识别模块，默认使用function_call。开启后，可以播放音乐、控制音量、识别退出指令
@@ -343,15 +343,24 @@ TTS:
     access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
     cluster: volcano_tts
 
+  tts_pool:
+    type: tts_pool
+    provider: bytedanceStream  # 指定底层使用的TTS provider
+    max_pool_size: 5
+
+
   bytedanceStream:
-    # 定义TTS API类型
     type: bytedance
-    url: wss://openspeech.bytedance.com/api/v3/tts/bidirection
-    voice: zh_female_wanwanxiaohe_moon_bigtts
     appid: "7864085684"
     access_token: "RtRG9t6BnOVe8yOSWL8AbZW3fKncyoYR"
+    voice: "zh_female_shuangkuaisisi_moon_bigtts"
+    audio_format: "mp3"
     output_dir: tmp/
-    
+    audio_sample_rate: 24000
+    url: "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+    delete_audio: false
+    max_queue_size: 100
+
   CosyVoiceSiliconflow:
     type: siliconflow
     # 硅基流动TTS

@@ -49,6 +49,8 @@ async def handleAudioMessage(conn, audio):
             tasks = []
 
             start_time = time.time()
+
+            conn.prepare_session()
             
             # 添加语音识别任务
             asr_task = asyncio.create_task(conn.asr.speech_to_text(conn.asr_audio, conn.session_id))
@@ -99,6 +101,7 @@ async def handleAudioMessage(conn, audio):
         conn.reset_vad_states()
 
 
+
 async def startToChat(conn, text, emotion=None, speaker_id=None):
     # 首先进行意图分析
     intent_handled = await handle_user_intent(conn, text)
@@ -112,10 +115,25 @@ async def startToChat(conn, text, emotion=None, speaker_id=None):
     await send_stt_message(conn, text)
     if conn.use_function_call_mode:
         # 使用支持function calling的聊天方法
-        conn.executor.submit(conn.chat_with_function_calling, text, False,emotion, speaker_id)
+        def chat_and_release():
+            try:
+                conn.chat_with_function_calling(text, False, emotion, speaker_id)
+            finally:
+                # 使用run_coroutine_threadsafe来调用异步函数
+                conn.release_session()
+        
+        # 使用executor提交任务
+        conn.executor.submit(chat_and_release)
     else:
-        conn.executor.submit(conn.chat, text, emotion, speaker_id)
-
+        def chat_and_release():
+            try:
+                conn.chat(text, emotion, speaker_id)
+            finally:
+                # 使用run_coroutine_threadsafe来调用异步函数
+                asyncio.run_coroutine_threadsafe(conn.release_session(), asyncio.get_event_loop())
+        
+        # 使用executor提交任务
+        conn.executor.submit(chat_and_release)
 
 async def no_voice_close_connect(conn):
     if conn.client_no_voice_last_time == 0.0:

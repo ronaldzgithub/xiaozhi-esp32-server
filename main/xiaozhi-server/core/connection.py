@@ -70,28 +70,16 @@ class ConnectionHandler:
         # 线程任务相关
         self.loop = asyncio.get_event_loop()
         self.stop_event = threading.Event()
-        self.tts_queue = queue.Queue()
         self.audio_play_queue = queue.Queue()
 
         # 依赖的组件
         self.vad = _vad
         self.asr = _asr
         self.llm = _llm
-        self.tts = _tts
+        self.tts = _tts  # TTSPool实例
         self.memory = _memory
         self.intent = _intent
 
-        # 设置 TTS 音频播放队列
-        self.tts.set_audio_play_queue(self.audio_play_queue)
-        self.logger.bind(tag=TAG).info(f"TTS queue: {self.tts}")
-        self.logger.bind(tag=TAG).info(f"Audio play queue: {self.audio_play_queue}")
-        self.logger.bind(tag=TAG).info(f"Audio play queue: {self.tts.set_audio_play_queue}")
-
-
-        # 设置 TTS 队列
-        if hasattr(self.tts, 'set_tts_queue'):
-            self.tts.set_tts_queue(self.tts_queue)
-            self.logger.bind(tag=TAG).info("TTS queue has been set in TTSProvider")
 
         # vad相关变量
         self.client_audio_buffer = bytes()
@@ -211,6 +199,9 @@ class ConnectionHandler:
             self.websocket = ws
             self.session_id = str(uuid.uuid4())
 
+            # 设置当前会话ID
+            self.tts.current_session_id = self.session_id
+
             self.welcome_msg = self.config["xiaozhi"]
             self.welcome_msg["session_id"] = self.session_id
             await self.websocket.send(json.dumps(self.welcome_msg))
@@ -297,6 +288,16 @@ class ConnectionHandler:
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
             await handleAudioMessage(self, message)
+
+    def prepare_session(self):
+        """准备会话, 获取TTS连接"""
+        if hasattr(self.tts, 'acquire'):
+            self.tts.acquire(self.session_id, self.audio_play_queue)
+
+    def release_session(self):
+        """释放会话, 释放TTS连接"""
+        if hasattr(self.tts, 'release'):
+            self.tts.release(self.session_id)
 
     def _initialize_components(self):
         """加载提示词"""
@@ -598,13 +599,13 @@ class ConnectionHandler:
                                         first_pause_pos = last_punct_pos
                                 
                                     first_text = segment_text[:first_pause_pos]
-                                    self.speak_and_play(first_text, text_index)
+                                    self.speak_and_play(first_text, text_index, session_id=self.session_id)
                                     self.tts_first_text_index = text_index
                                     segment_text = segment_text[len(first_text):]
                                     text_index += 1
 
                                 self.recode_first_last_text(segment_text, text_index)
-                                self.speak_and_play(segment_text, text_index)
+                                self.speak_and_play(segment_text, text_index, session_id=self.session_id)
 
                                 processed_chars += len(segment_text_raw)
                                 
@@ -628,7 +629,7 @@ class ConnectionHandler:
                 if segment_text:
                     text_index += 1
                     self.recode_first_last_text(segment_text, text_index)
-                    self.speak_and_play(segment_text, text_index)
+                    self.speak_and_play(segment_text, text_index, session_id=self.session_id)
 
             # 处理函数调用
             if tool_call_flag:
@@ -740,8 +741,7 @@ class ConnectionHandler:
         if result.action == Action.RESPONSE:  # 直接回复前端
             text = result.response
             self.recode_first_last_text(text, text_index)
-            future = self.executor.submit(self.speak_and_play, text, text_index)
-            self.tts_queue.put(future)
+            future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
             self.dialogue.put(Message(role="assistant", content=text))
         elif result.action == Action.REQLLM:  # 调用函数后再请求llm生成回复
 
@@ -764,14 +764,12 @@ class ConnectionHandler:
         elif result.action == Action.NOTFOUND:
             text = result.result
             self.recode_first_last_text(text, text_index)
-            future = self.executor.submit(self.speak_and_play, text, text_index)
-            self.tts_queue.put(future)
+            future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
             self.dialogue.put(Message(role="assistant", content=text))
         else:
             text = result.result
             self.recode_first_last_text(text, text_index)
-            future = self.executor.submit(self.speak_and_play, text, text_index)
-            self.tts_queue.put(future)
+            future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
             self.dialogue.put(Message(role="assistant", content=text))
 
     def _tts_priority_thread(self):
@@ -843,7 +841,7 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).error(f"audio_play_priority priority_thread: {text} {e}")
             asyncio.sleep(0.01)
 
-    def speak_and_play(self, text, text_index=0):
+    def speak_and_play(self, text, text_index=0, session_id=None):
         if text is None or len(text) <= 0:
             self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
             return None, text, text_index
@@ -852,7 +850,7 @@ class ConnectionHandler:
         try:
             self.logger.bind(tag=TAG).info(f"TTS 开始转换: {text} {datetime.now()}")
             # 在主线程中运行
-            tts_file = asyncio.run_coroutine_threadsafe(self.tts.text_to_speak(text, text_index), self.loop).result()
+            tts_file = asyncio.run_coroutine_threadsafe(self.tts.text_to_speak(text, text_index, session_id=session_id), self.loop).result()
                 
             if tts_file is None:
                 self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
@@ -881,6 +879,11 @@ class ConnectionHandler:
         # 清理MCP资源
         await self.mcp_manager.cleanup_all()
 
+        # 释放TTS连接
+        if self.tts and self.session_id:
+            self.tts.release(self.session_id)
+            self.logger.bind(tag=TAG).info(f"Released TTS provider for session {self.session_id}")
+
         # 触发停止事件并清理资源
         if self.stop_event:
             self.stop_event.set()
@@ -901,7 +904,7 @@ class ConnectionHandler:
 
     def _clear_queues(self):
         # 清空所有任务队列
-        for q in [self.tts_queue, self.audio_play_queue]:
+        for q in [self.audio_play_queue]:
             if not q:
                 continue
             while not q.empty():
@@ -984,15 +987,17 @@ class ConnectionHandler:
         
         """开始主动对话"""
         # 添加到对话历史并开始对话
+        self.prepare_session()
         await send_stt_message(self, content)
         
         # 直接使用 ByteDance TTS provider 生成语音
-        tts_file = await self.tts.text_to_speak(content, 0)
+        tts_file = await self.tts.text_to_speak(content, 0, session_id=self.session_id)
         self.tts_last_text_index = 0
         self.tts_first_text_index = 0
         self.llm_finish_task = True
         self.asr_server_receive = True
         self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
+        #self.release_session()
 
         return True
 

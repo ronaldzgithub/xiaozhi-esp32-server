@@ -144,7 +144,6 @@ async def process_intent_result(conn, intent_result, original_text):
                             conn.speak_and_play, text, text_index
                         )
                         conn.llm_finish_task = True
-                        conn.tts_queue.put(future)
                         conn.dialogue.put(Message(role="assistant", content=text))
 
             # 将函数执行放在线程池中

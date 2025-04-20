@@ -54,6 +54,7 @@ async def handleTextMessage(conn, message):
                         await send_stt_message(conn, text)
                         await send_tts_message(conn, "stop", None)
                     else:
+                        conn.prepare_session()
                         # 否则需要LLM对文字内容进行答复
                         await startToChat(conn, text)
         elif msg_json["type"] == "iot":
