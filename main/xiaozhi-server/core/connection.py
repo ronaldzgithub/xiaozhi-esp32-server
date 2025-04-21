@@ -384,8 +384,8 @@ class ConnectionHandler:
             if auth_code:
                 # 发送验证码语音提示
                 text = f"请在后台输入验证码：{' '.join(auth_code)}"
-                self.recode_first_last_text(text)
-                self.send_full_audio_message(text)
+                if self.recode_first_last_text(text):
+                    self.send_full_audio_message(text)
             return False
         return True
 
@@ -456,9 +456,11 @@ class ConnectionHandler:
                 segment_text = get_string_no_punctuation_or_emoji(segment_text_raw)
                 if segment_text:
                     text_index += 1
-                    self.recode_first_last_text(segment_text, text_index)
-                    # 使用 ByteDance TTS provider 生成语音
-                    self.speak_and_play(segment_text, text_index)
+                    if self.recode_first_last_text(segment_text, text_index):
+                        # 使用 ByteDance TTS provider 生成语音
+                        self.speak_and_play(segment_text, text_index)
+                    else:
+                        text_index -=1
 
                     processed_chars += len(segment_text_raw)  # 更新已处理字符位置
 
@@ -468,10 +470,10 @@ class ConnectionHandler:
         if remaining_text:
             segment_text = get_string_no_punctuation_or_emoji(remaining_text)
             if segment_text:
-                text_index += 1
-                self.recode_first_last_text(segment_text, text_index)
-                # 使用 ByteDance TTS provider 生成语音
-                self.speak_and_play(segment_text, text_index)
+                if self.recode_first_last_text(segment_text, text_index+1):
+                    text_index += 1
+                    # 使用 ByteDance TTS provider 生成语音
+                    self.speak_and_play(segment_text, text_index)
 
         self.llm_finish_task = True
         response_text = "".join(response_message)
@@ -607,8 +609,10 @@ class ConnectionHandler:
                                     segment_text = segment_text[len(first_text):]
                                     text_index += 1
 
-                                self.recode_first_last_text(segment_text, text_index)
-                                self.speak_and_play(segment_text, text_index, session_id=self.session_id)
+                                if self.recode_first_last_text(segment_text, text_index):
+                                    self.speak_and_play(segment_text, text_index, session_id=self.session_id)
+                                else:
+                                    text_index -=1
 
                                 processed_chars += len(segment_text_raw)
                                 
@@ -631,8 +635,10 @@ class ConnectionHandler:
                 segment_text = get_string_no_punctuation_or_emoji(remaining_text)
                 if segment_text:
                     text_index += 1
-                    self.recode_first_last_text(segment_text, text_index)
-                    self.speak_and_play(segment_text, text_index, session_id=self.session_id)
+                    if self.recode_first_last_text(segment_text, text_index):
+                        self.speak_and_play(segment_text, text_index, session_id=self.session_id)
+                    else:
+                        text_index -=1
 
             # 处理函数调用
             if tool_call_flag:
@@ -743,9 +749,11 @@ class ConnectionHandler:
     def _handle_function_result(self, result, function_call_data, text_index):
         if result.action == Action.RESPONSE:  # 直接回复前端
             text = result.response
-            self.recode_first_last_text(text, text_index)
-            future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
-            self.dialogue.put(Message(role="assistant", content=text))
+            if self.recode_first_last_text(text, text_index):
+                future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
+                self.dialogue.put(Message(role="assistant", content=text))
+            else:
+                return False
         elif result.action == Action.REQLLM:  # 调用函数后再请求llm生成回复
 
             text = result.result
@@ -766,15 +774,20 @@ class ConnectionHandler:
                 self.chat_with_function_calling(text, tool_call=True)
         elif result.action == Action.NOTFOUND:
             text = result.result
-            self.recode_first_last_text(text, text_index)
-            future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
-            self.dialogue.put(Message(role="assistant", content=text))
+            if self.recode_first_last_text(text, text_index):
+                future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
+                self.dialogue.put(Message(role="assistant", content=text))
+            else:
+                return False
         else:
             text = result.result
-            self.recode_first_last_text(text, text_index)
-            future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
-            self.dialogue.put(Message(role="assistant", content=text))
-
+            if self.recode_first_last_text(text, text_index):
+                future = self.executor.submit(self.speak_and_play, text, text_index, session_id=self.session_id)
+                self.dialogue.put(Message(role="assistant", content=text))
+            else:
+                return False
+        return True
+    
     def _tts_priority_thread(self):
         while not self.stop_event.is_set():
             text = None
@@ -847,23 +860,17 @@ class ConnectionHandler:
     def speak_and_play(self, text, text_index=0, session_id=None):
         if text is None or len(text) <= 0:
             self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
-            return None, text, text_index
+            return None
             
         # 使用 ByteDance TTS provider 生成语音
         try:
             self.logger.bind(tag=TAG).info(f"TTS 开始转换: {text} {datetime.now()}")
             # 在主线程中运行
-            tts_file = asyncio.run_coroutine_threadsafe(self.tts.text_to_speak(text, text_index, session_id=session_id), self.loop).result()
-                
-            if tts_file is None:
-                self.logger.bind(tag=TAG).error(f"tts转换失败，{text}")
-                return None, text, text_index
+            asyncio.run_coroutine_threadsafe(self.tts.text_to_speak(text, text_index, session_id=session_id), self.loop).result()
+            return None
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"tts转换异常: {e}")
-            return None, text, text_index
-            
-        self.logger.bind(tag=TAG).debug(f"TTS 文件生成完毕: {tts_file}")
-        return tts_file, text, text_index
+            return None            
 
     def clearSpeakStatus(self):
         self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
@@ -872,10 +879,16 @@ class ConnectionHandler:
         self.tts_first_text_index = -1
 
     def recode_first_last_text(self, text, text_index=0):
+        # 如果text为空，则不记录
+        if text is None or len(text) <= 0:
+            self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
+            return False
+        
         if self.tts_first_text_index == -1:
             self.logger.bind(tag=TAG).info(f"大模型说出第一句话: {text}, 时间: {datetime.now()}")
             self.tts_first_text_index = text_index
         self.tts_last_text_index = text_index
+        return True
 
     async def close(self, ws=None):
         """资源清理方法"""
@@ -983,9 +996,9 @@ class ConnectionHandler:
 
     async def send_full_audio_message(self, content):
         # 检查系统是否正在说话
-        """if not self.asr_server_receive:
-            self.logger.bind(tag=TAG).debug(f"系统正在说话，等待中... {content}")
-            return"""
+        if not self.asr_server_receive:
+            self.logger.bind(tag=TAG).warning(f"系统正在说话，等待中... {content}")
+            return
         
         """开始主动对话"""
         # 添加到对话历史并开始对话
@@ -999,7 +1012,7 @@ class ConnectionHandler:
         self.llm_finish_task = True
         self.asr_server_receive = True
         self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
-        
+
         return True
 
     async def start_proactive_check(self):

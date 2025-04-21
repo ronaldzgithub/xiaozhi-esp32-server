@@ -15,19 +15,27 @@ async def sendAudioMessage(conn, audios, text, text_index=0):
     # 发送句子开始消息
     if text_index == conn.tts_first_text_index:
         logger.bind(tag=TAG).info(f"发送第一段语音: {text}")
-    await send_tts_message(conn, "sentence_start", text)
+    try:
+        await send_tts_message(conn, "sentence_start", text)
 
-    # 播放音频
-    await sendAudio(conn, audios)
+        # 播放音频
+        await sendAudio(conn, audios)
 
-    await send_tts_message(conn, "sentence_end", text)
+        await send_tts_message(conn, "sentence_end", text)
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"发送音频消息失败: {e}")    
+    finally:
 
-    # 发送结束消息（如果是最后一个文本）
-    if conn.llm_finish_task and text_index == conn.tts_last_text_index:
-        await send_tts_message(conn, "stop", None)
-        if conn.close_after_chat:
-            await conn.close()
-
+    
+        # 发送结束消息（如果是最后一个文本）
+        if conn.llm_finish_task and text_index == conn.tts_last_text_index:
+            await send_tts_message(conn, "stop", None)
+            logger.bind(tag=TAG).warning(f"{conn.session_id}到了最后一句， 执行结束... text_index:{text_index}「tts_last_text_index:{conn.tts_last_text_index}」llm_finish_task:{conn.llm_finish_task}")
+            if conn.close_after_chat:
+                await conn.close()
+        else:
+            if text_index == conn.tts_last_text_index or conn.llm_finish_task:
+                logger.bind(tag=TAG).error(f"{conn.session_id}到了最后一句， 但是没有执行结束... text_index:{text_index}「tts_last_text_index:{conn.tts_last_text_index}」llm_finish_task:{conn.llm_finish_task}")
 
 # 播放音频
 async def sendAudio(conn, audios):

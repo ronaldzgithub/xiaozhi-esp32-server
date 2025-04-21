@@ -11,7 +11,7 @@ from core.utils.tts import create_instance
 from config.settings import load_config
 TAG = __name__
 logger = setup_logging()
-IDLE_TIMEOUT = 3  # 5分钟超时时间（秒）
+IDLE_TIMEOUT = 5  # 5分钟超时时间（秒）
 
 class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file = True):
@@ -35,7 +35,7 @@ class TTSProvider(TTSProviderBase):
                     await self._check_idle_connections()
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"Error in idle check task: {e}")
-                await asyncio.sleep(3)  # 每分钟检查一次
+                await asyncio.sleep(0.5)  # 每分钟检查2次
         except asyncio.CancelledError:
             logger.bind(tag=TAG).info("Idle check task cancelled")
             raise
