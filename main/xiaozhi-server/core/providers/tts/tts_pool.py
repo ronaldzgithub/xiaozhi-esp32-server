@@ -11,7 +11,7 @@ from core.utils.tts import create_instance
 from config.settings import load_config
 TAG = __name__
 logger = setup_logging()
-IDLE_TIMEOUT = 300  # 5分钟超时时间（秒）
+IDLE_TIMEOUT = 3  # 5分钟超时时间（秒）
 
 class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file = True):
@@ -35,7 +35,7 @@ class TTSProvider(TTSProviderBase):
                     await self._check_idle_connections()
                 except Exception as e:
                     logger.bind(tag=TAG).error(f"Error in idle check task: {e}")
-                await asyncio.sleep(60)  # 每分钟检查一次
+                await asyncio.sleep(3)  # 每分钟检查一次
         except asyncio.CancelledError:
             logger.bind(tag=TAG).info("Idle check task cancelled")
             raise
@@ -43,17 +43,16 @@ class TTSProvider(TTSProviderBase):
     async def _check_idle_connections(self):
         """检查并释放空闲连接"""
         current_time = time.time()
-        with self.lock:
-            # 收集需要释放的session_id
-            to_release = []
-            for session_id, pool_item in self.in_use.items():
-                if current_time - pool_item.last_used > IDLE_TIMEOUT:
-                    to_release.append(session_id)
-                    logger.bind(tag=TAG).info(f"Session {session_id} idle for too long, will be released")
+        # 收集需要释放的session_id
+        to_release = []
+        for session_id, pool_item in self.in_use.items():
+            if current_time - pool_item.last_used > IDLE_TIMEOUT:
+                to_release.append(session_id)
+                logger.bind(tag=TAG).info(f"Session {session_id} idle for too long, will be released")
 
-            # 释放空闲连接
-            for session_id in to_release:
-                await self.release(session_id)
+        # 释放空闲连接
+        for session_id in to_release:
+            await self.release(session_id)
 
     def generate_filename(self):
         """Generate a unique filename for the TTS output"""
@@ -70,7 +69,7 @@ class TTSProvider(TTSProviderBase):
             tts_provider = create_instance(type, config)
             self.pool.put(tts_provider)
 
-    def acquire(self, session_id: str, audio_play_queue) -> Optional['TTSPoolItem']:
+    def acquire(self, session_id: str, audio_play_queue, voice) -> Optional['TTSPoolItem']:
         """获取一个TTS连接"""
         with self.lock:
             if session_id in self.in_use:
@@ -81,6 +80,7 @@ class TTSProvider(TTSProviderBase):
             try:
                 tts_provider = self.pool.get_nowait()
                 tts_provider.set_audio_play_queue(audio_play_queue)
+                tts_provider.set_voice(voice)
                 pool_item = TTSPoolItem(tts_provider, session_id)
                 self.in_use[session_id] = pool_item
                 logger.bind(tag=TAG).info(f"Acquired TTS provider for session {session_id}")
@@ -89,17 +89,14 @@ class TTSProvider(TTSProviderBase):
                 logger.bind(tag=TAG).warning("No available TTS providers in pool")
                 return None
 
-    def release(self, session_id: str):
+    async def release(self, session_id: str):
         """释放TTS连接回连接池"""
         with self.lock:
             if session_id in self.in_use:
                 pool_item = self.in_use.pop(session_id)
                 tts_provider = pool_item.tts_provider
-                start_time = time.time()
-                while not tts_provider.audio_play_queue.empty() or time.time() - start_time < 3:
-                    logger.bind(tag=TAG).debug(f"Releasing audio play queue for session {session_id}")
-                    time.sleep(0.1)  # Wait for a short period before checking again
                 tts_provider.set_audio_play_queue(None)
+                tts_provider.set_voice(None)
                 try:
                     self.pool.put_nowait(tts_provider)
                     logger.bind(tag=TAG).info(f"Released TTS provider for session {session_id}")
@@ -130,13 +127,15 @@ class TTSProvider(TTSProviderBase):
         pool_item.update_last_used()  # 更新最后使用时间
         return await pool_item.tts_provider.text_to_speak(text, text_index, output_file)
 
-    def set_voice(self, voice):
+    def set_voice(self, voice, session_id=None):
         """设置语音"""
-        with self.lock:
-            for tts_provider in list(self.pool.queue):
-                tts_provider.set_voice(voice)
-            for pool_item in self.in_use.values():
-                pool_item.tts_provider.set_voice(voice)
+        if not session_id:
+            raise ValueError("session_id is required")
+        pool_item = self.in_use.get(session_id)
+        if not pool_item:
+            logger.bind(tag=TAG).error(f"No TTS provider for session {session_id}, please check the session_id of the session")
+            return None
+        pool_item.tts_provider.set_voice(voice)
 
     async def close(self):
         """关闭所有TTS连接"""

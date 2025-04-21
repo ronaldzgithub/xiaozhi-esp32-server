@@ -114,16 +114,8 @@ async def startToChat(conn, text, emotion=None, speaker_id=None):
     # 意图未被处理，继续常规聊天流程
     await send_stt_message(conn, text)
     if conn.use_function_call_mode:
-        # 使用支持function calling的聊天方法
-        def chat_and_release():
-            try:
-                conn.chat_with_function_calling(text, False, emotion, speaker_id)
-            finally:
-                # 使用run_coroutine_threadsafe来调用异步函数
-                conn.release_session()
-        
         # 使用executor提交任务
-        conn.executor.submit(chat_and_release)
+        conn.executor.submit(conn.chat_with_function_calling,text, False, emotion, speaker_id)
     else:
         def chat_and_release():
             try:

@@ -48,7 +48,7 @@ class TTSProviderBase(ABC):
     async def text_to_speak(self, text, output_file, session_id=None):
         pass
 
-    def set_voice(self, voice):
+    def set_voice(self, voice, session_id=None):
         self.voice = voice
 
     def audio_to_opus_data(self, audio_file_path):

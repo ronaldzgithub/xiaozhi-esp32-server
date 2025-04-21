@@ -239,6 +239,18 @@ class ConnectionHandler:
                     self.private_config = None
                     raise
 
+            
+            """加载记忆"""
+            roles = self.config.get("roles", [])
+            device_id = self.headers.get("device-id", None)
+            #load 最近的一个role
+            self.memory.init_memory(device_id, None, self.llm)
+            #如果没有记录这个role，则使用默认的role
+            if self.memory.role_id is None:
+                self.memory.set_role_id(roles[0]["name"])
+
+            self.switch_role(self.memory.role_id)
+
             # 异步初始化
             self.executor.submit(self._initialize_components)
             """# tts 消化线程
@@ -292,12 +304,12 @@ class ConnectionHandler:
     def prepare_session(self):
         """准备会话, 获取TTS连接"""
         if hasattr(self.tts, 'acquire'):
-            self.tts.acquire(self.session_id, self.audio_play_queue)
+            self.tts.acquire(self.session_id, self.audio_play_queue, self.voice)
 
-    def release_session(self):
+    async def release_session(self):
         """释放会话, 释放TTS连接"""
         if hasattr(self.tts, 'release'):
-            self.tts.release(self.session_id)
+            await self.tts.release(self.session_id)
 
     def _initialize_components(self):
         """加载提示词"""
@@ -322,15 +334,6 @@ class ConnectionHandler:
         """加载插件"""
         self.func_handler = FunctionHandler(self)
 
-        """加载记忆"""
-        device_id = self.headers.get("device-id", None)
-        #load 最近的一个role
-        self.memory.init_memory(device_id, None, self.llm)
-        #如果没有记录这个role，则使用默认的role
-        if self.memory.role_id is None:
-            self.memory.set_role_id(roles[0]["name"])
-
-        self.switch_role(self.memory.role_id)
             
         """为意图识别设置LLM，优先使用专用LLM"""
         # 检查是否配置了专用的意图识别LLM
@@ -1148,11 +1151,16 @@ class ConnectionHandler:
                 tts_type = self.config.get("TTS", {}).get(tts, {}).get("type", "").lower()
                 if tts_type:
                     # 获取对应TTS类型的voice配置
+                    if tts_type == "tts_pool":
+                        provider = self.config.get("TTS", {}).get(tts_type, {}).get("provider", 'bytedanceStream')
+                        tts_type = self.config.get("TTS", {}).get(provider, {}).get('type', 'bytedance')
+                
                     voice = target_role["voice"].get(tts_type)
                     if voice:
-                        self.tts.set_voice(voice)
-                        self.logger.bind(tag=TAG).info(f"已设置TTS语音为: {voice}")
-                    
+                        self.tts.set_voice(voice, session_id=self.session_id)
+                        self.voice = voice
+                    self.logger.bind(tag=TAG).info(f"已设置TTS语音为: {voice}")
+                
             
             self.logger.bind(tag=TAG).info(f"成功切换到角色: {role_name}")
             return True
