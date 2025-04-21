@@ -76,7 +76,6 @@ class TTSProvider(TTSProviderBase):
                 pool_item = self.in_use[session_id]
                 pool_item.update_last_used()  # 更新最后使用时间
                 return pool_item
-
             try:
                 tts_provider = self.pool.get_nowait()
                 tts_provider.set_audio_play_queue(audio_play_queue)
@@ -84,6 +83,7 @@ class TTSProvider(TTSProviderBase):
                 pool_item = TTSPoolItem(tts_provider, session_id)
                 self.in_use[session_id] = pool_item
                 logger.bind(tag=TAG).info(f"Acquired TTS provider for session {session_id}")
+                pool_item.update_last_used()  # 更新最后使用时间    
                 return pool_item
             except queue.Empty:
                 logger.bind(tag=TAG).warning("No available TTS providers in pool")
@@ -123,9 +123,9 @@ class TTSProvider(TTSProviderBase):
         if not pool_item:
             logger.bind(tag=TAG).error(f"No TTS provider for session {session_id}, please check the session_id of the session")
             return None
-
+        
+        await pool_item.tts_provider.text_to_speak(text, text_index, output_file)
         pool_item.update_last_used()  # 更新最后使用时间
-        return await pool_item.tts_provider.text_to_speak(text, text_index, output_file)
 
     def set_voice(self, voice, session_id=None):
         """设置语音"""

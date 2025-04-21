@@ -884,7 +884,6 @@ class ConnectionHandler:
 
         # 释放TTS连接
         if self.tts and self.session_id:
-            self.tts.release(self.session_id)
             self.logger.bind(tag=TAG).info(f"Released TTS provider for session {self.session_id}")
 
         # 触发停止事件并清理资源
@@ -1000,8 +999,7 @@ class ConnectionHandler:
         self.llm_finish_task = True
         self.asr_server_receive = True
         self.logger.bind(tag=TAG).info(f"发起主动对话: {content}")
-        #self.release_session()
-
+        
         return True
 
     async def start_proactive_check(self):
