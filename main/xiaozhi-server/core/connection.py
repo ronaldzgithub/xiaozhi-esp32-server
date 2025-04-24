@@ -561,6 +561,8 @@ class ConnectionHandler:
             
             for response in llm_responses:
                 content, tools_call = response
+
+                
                 if content is not None and len(content) > 0:
                     if not tool_call_flag:
                         response_message.append(content)
@@ -583,6 +585,7 @@ class ConnectionHandler:
                         if last_punct_pos != -1:
                             segment_text_raw = current_text[:last_punct_pos + 1]
                             segment_text = get_string_no_punctuation_or_emoji(segment_text_raw)
+                            
                             
                             if segment_text:
                                 text_index += 1
