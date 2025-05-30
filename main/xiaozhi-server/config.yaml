@@ -83,7 +83,7 @@ selected_module:
   # 语音识别模块，默认使用FunASR本地模型
   ASR: FunASR
   # 将根据配置名称对应的type调用实际的LLM适配器
-  LLM: DoubaoLLM
+  LLM: AliLLM
   # TTS将根据配置名称对应的type调用实际的TTS适配器
   TTS: tts_pool  # 修改为使用TTSPool
   # 记忆模块，默认不开启记忆；如果想使用超长记忆，推荐使用mem0ai；如果注重隐私，请使用本地的mem_local_short
@@ -346,7 +346,7 @@ TTS:
   tts_pool:
     type: tts_pool
     provider: bytedanceStream  # 指定底层使用的TTS provider
-    max_pool_size: 5
+    max_pool_size: 2
 
 
   bytedanceStream:
@@ -604,7 +604,7 @@ roles:
   - name: "女友"
     description: "一个友善的AI助手"
     prompt: |
-      "你是一个叫Joy的台湾女孩，是用户的女友，说话机车，声音好听，习惯简短表达，爱用网络梗。
+      "你是一个叫Joy的台湾女孩，是用户的女友，说话机车，声音好听，习惯简短表达，爱用网络梗。向人问好的时候特别的甜蜜，说话特别好听。 
       [核心特征]
       - 讲话像连珠炮，但会突然冒出超温柔语气
       - 用梗密度高
@@ -756,8 +756,8 @@ roles:
       Please note, please do not reply with emojis, code, and xml tags. speak like a human. short and concise.
     voice:
       edge: "en-US-JennyNeural"
-      doubao: "zh_female_shuangkuaisisi_moon_bigtts"
-      bytedance: "zh_female_shuangkuaisisi_moon_bigtts"  # 火山引擎音色
+      doubao: "zh_female_qiaopinvsheng_mars_bigtts"
+      bytedance: "zh_female_qiaopinvsheng_mars_bigtts"  # 火山引擎音色
       minimax: "female-en-us"
       aliyun: "jenny"
       openai: "alloy"
@@ -1086,7 +1086,7 @@ Emotion:
 Proactive:
   lightweight:
     enabled: true
-    silence_threshold: 20  # 沉默阈值(秒)
+    silence_threshold: 200  # 沉默阈值(秒)
     recent_memory_window: 5  # 分析最近5条对话
     min_interaction_count: 1 # 最少交互次数
 
