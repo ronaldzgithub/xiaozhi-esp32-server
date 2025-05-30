@@ -601,18 +601,17 @@ class ConnectionHandler:
                                         if pos != -1:
                                             pause_positions.append(pos)
                                     if pause_positions:
-                                        first_pause_pos = max(6,min(max(pause_positions), first_pause_pos))
+                                        first_pause_pos = max(16,min(max(pause_positions), first_pause_pos))
                                     
                                     if last_punct_pos < first_pause_pos:
                                         first_pause_pos = last_punct_pos
                                 
                                     first_text = segment_text[:first_pause_pos]
-                                    self.speak_and_play(first_text, text_index, session_id=self.session_id)
-                                    self.tts_first_text_index = text_index
+                                    if self.recode_first_last_text(first_text, text_index):
+                                        self.speak_and_play(first_text, text_index, session_id=self.session_id)
                                     segment_text = segment_text[len(first_text):]
-                                    text_index += 1
-
-                                if self.recode_first_last_text(segment_text, text_index):
+                                    
+                                elif self.recode_first_last_text(segment_text, text_index):
                                     self.speak_and_play(segment_text, text_index, session_id=self.session_id)
                                 else:
                                     text_index -=1
@@ -863,7 +862,8 @@ class ConnectionHandler:
     def speak_and_play(self, text, text_index=0, session_id=None):
         if text is None or len(text) <= 0:
             self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
-            return None
+            text = '.'
+            #return None
             
         # 使用 ByteDance TTS provider 生成语音
         try:
@@ -885,7 +885,7 @@ class ConnectionHandler:
         # 如果text为空，则不记录
         if text is None or len(text) <= 0:
             self.logger.bind(tag=TAG).info(f"无需tts转换，query为空，{text}")
-            return False
+            text = '.'
         
         if self.tts_first_text_index == -1:
             self.logger.bind(tag=TAG).info(f"大模型说出第一句话: {text}, 时间: {datetime.now()}")

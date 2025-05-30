@@ -209,7 +209,7 @@ class MemoryProvider(MemoryProviderBase):
             if speaker_id:
                 # 获取特定说话人的记忆
                 if speaker_id in self.user_memories:
-                    memories = self.user_memories[speaker_id].get("memories", [])[-5:]
+                    memories = self.user_memories[speaker_id].get("memories", [])[-100:]
                     for memory in memories:
                         if 'metadata' in memory:
                             del memory['metadata']
